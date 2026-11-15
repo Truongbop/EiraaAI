@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EIRAA – Báo cáo công việc</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar" id="sidebar">
+    <div class="brand"><div class="logo">E</div><div><b id="companyName">EIRAA</b><small>Báo cáo công việc</small></div></div>
+    <nav id="nav">
+      <a data-v="report">📝 Nộp báo cáo</a>
+      <a data-v="overview">📊 Tổng quan</a>
+      <a data-v="tasks">📌 Công việc</a>
+      <a data-v="history">🗂️ Lịch sử báo cáo</a>
+      <a data-v="users">👥 Nhân viên</a>
+      <a data-v="audit">🧾 Nhật ký</a>
+    </nav>
+    <div class="status" id="botStatus"></div>
+  </aside>
+
+  <main>
+    <header class="topbar">
+      <button class="icon-btn menu" id="menuBtn" aria-label="Menu">☰</button>
+      <h1 id="viewTitle"></h1>
+      <button class="icon-btn" id="themeBtn" title="Sáng / tối">🌓</button>
+    </header>
+
+    <!-- NỘP BÁO CÁO -->
+    <section class="view" id="v-report">
+      <form id="submitForm" class="card">
+        <div class="grid-2">
+          <label><span>Người nộp <span class="req">*</span></span><select id="reporter" required></select></label>
+          <label><span>Chủ đề báo cáo <span class="req">*</span></span>
+            <input id="subject" required minlength="2" placeholder="VD: Báo cáo doanh số tuần 46"></label>
+        </div>
+        <label class="drop" id="drop">
+          <input type="file" id="fileInput" multiple accept=".xlsx,.xls,.docx,.doc" hidden>
+          <div class="drop-icon">📤</div>
+          <b>Kéo thả file Excel hoặc Word vào đây</b>
+          <span class="muted">hoặc bấm để chọn file · .xlsx .xls .docx .doc · tối đa 20MB</span>
+        </label>
+        <div id="pickedList"></div>
+        <div class="row end"><button class="btn primary" id="submitBtn">📨 Nộp báo cáo</button></div>
+      </form>
+
+      <div class="card">
+        <div class="row between mb">
+          <h3 style="margin:0">📁 Báo cáo đã nộp</h3>
+          <select id="subDays"><option value="1">Hôm nay</option><option value="7" selected>7 ngày</option><option value="30">30 ngày</option></select>
+        </div>
+        <div id="subList"></div>
+      </div>
+    </section>
+
+    <!-- TỔNG QUAN -->
+    <section class="view hidden" id="v-overview">
+      <div class="row gap8 mb"><input type="date" id="ovDate"></div>
+      <div class="kpis" id="kpis"></div>
+      <div class="grid-2">
+        <div class="card"><h3>❌ Chưa nộp báo cáo</h3><div id="missingList"></div></div>
+        <div class="card"><h3>⚠️ Vấn đề trong ngày</h3><div id="issueList"></div></div>
+      </div>
+      <div class="card"><h3>📋 Báo cáo đã nộp</h3><div id="ovReports"></div></div>
+    </section>
+
+    <!-- CÔNG VIỆC -->
+    <section class="view hidden" id="v-tasks">
+      <form class="card form-inline" id="taskForm">
+        <input name="title" placeholder="Tên công việc mới" required class="grow">
+        <select name="assignee_id" class="userSelect" required></select>
+        <input name="deadline" type="date" title="Hạn hoàn thành">
+        <input name="description" placeholder="Mô tả (không bắt buộc)" class="grow">
+        <button class="btn primary">+ Giao việc</button>
+      </form>
+      <div class="card">
+        <div class="row gap8 mb">
+          <select id="taskPerson"></select>
+          <select id="taskFilter"><option value="">Tất cả trạng thái</option></select>
+          <label class="row gap8 muted" style="margin:0"><input type="checkbox" id="overdueOnly"> Chỉ việc quá hạn</label>
+        </div>
+        <div class="table-wrap"><table id="taskTable"></table></div>
+      </div>
+    </section>
+
+    <!-- LỊCH SỬ -->
+    <section class="view hidden" id="v-history">
+      <div class="card">
+        <div class="row gap8 mb">
+          <select id="histPerson"></select>
+          <select id="histDays"><option value="7">7 ngày</option><option value="30" selected>30 ngày</option><option value="90">90 ngày</option></select>
+        </div>
+        <div id="historyList"></div>
+      </div>
+    </section>
+
+    <!-- NHÂN VIÊN -->
+    <section class="view hidden" id="v-users">
+      <form class="card form-inline" id="userForm">
+        <input name="full_name" placeholder="Họ tên" required class="grow">
+        <input name="department" placeholder="Phòng ban" list="deptList">
+        <input name="position" placeholder="Chức vụ">
+        <button class="btn primary">+ Thêm nhân viên</button>
+        <datalist id="deptList"></datalist>
+      </form>
+      <div class="card"><div class="table-wrap"><table id="userTable"></table></div></div>
+    </section>
+
+    <!-- NHẬT KÝ -->
+    <section class="view hidden" id="v-audit"><div class="card"><div class="table-wrap"><table id="auditTable"></table></div></div></section>
+  </main>
+</div>
+
+<dialog id="dlg"><form method="dialog" id="dlgForm" class="dlg"><h3 id="dlgTitle"></h3><div id="dlgBody"></div>
+  <div class="row end gap8"><button class="btn" value="cancel" formnovalidate>Hủy</button><button class="btn primary" value="ok">Lưu</button></div></form></dialog>
+<div id="toast" class="toast"></div>
+<script src="app.js"></script>
+</body>
+</html>
