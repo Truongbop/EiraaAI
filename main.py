@@ -80,7 +80,7 @@ async def lifespan(_):
     await start_bot()
     url = f"http://localhost:{PORT}"
     log.info("Web đang chạy: %s  (giữ cửa sổ này mở, bấm Ctrl+C để tắt)", url)
-    if os.getenv("OPEN_BROWSER", "1") != "0":
+    if os.name == "nt" and os.getenv("OPEN_BROWSER", "1") != "0":      # chỉ tự mở Chrome khi chạy trên Windows
         asyncio.get_running_loop().call_later(1.0, open_chrome, url)
     yield
     await stop_bot()

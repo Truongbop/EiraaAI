@@ -70,3 +70,10 @@ Bot tự động (từ thứ 2 đến thứ 7): 16:30 nhắc ai chưa nộp, 17:
 - Web không có đăng nhập: ai biết địa chỉ đều vào được. Chỉ nên dùng trong mạng nội bộ công ty, đừng đưa ra Internet công khai.
 - Không chia sẻ file `.env` (chứa token và key).
 - Bảng số liệu trong báo cáo lấy nguyên từ dữ liệu nhân viên nhập. AI chỉ viết phần tóm tắt; thiếu dữ liệu thì ghi "Chưa xác định".
+
+## Chạy 24/7 trên Railway
+1. Vào **railway.com** → đăng nhập bằng GitHub → **New Project** → **Deploy from GitHub repo** → chọn repo này.
+2. Tab **Variables**: thêm `TELEGRAM_BOT_TOKEN`, `COMPANY_NAME`, `DATA_DIR=/data` (và `OPENAI_API_KEY` nếu có).
+3. Chuột phải vào service → **Attach volume** → Mount path: `/data` (để dữ liệu không mất khi khởi động lại).
+4. Tab **Settings → Networking → Generate Domain** → nhận link web dạng `https://xxx.up.railway.app`.
+5. **Tắt `main.py` trên máy mình** – cùng một token chỉ được chạy ở 1 nơi.
