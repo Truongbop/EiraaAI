@@ -1,0 +1,20 @@
+# Cấu hình chạy miễn phí trên Render (render.com) – Blueprint
+services:
+  - type: web
+    name: eiraa-ai
+    runtime: python
+    plan: free
+    region: singapore
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py
+    healthCheckPath: /api/info
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.7"
+      - key: COMPANY_NAME
+        value: "Công ty ABC"
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false          # Render sẽ hỏi bạn nhập token khi tạo
+      - key: OPENAI_API_KEY
+        sync: false          # có thể bỏ trống

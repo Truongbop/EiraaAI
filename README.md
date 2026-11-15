@@ -77,3 +77,11 @@ Bot tự động (từ thứ 2 đến thứ 7): 16:30 nhắc ai chưa nộp, 17:
 3. Chuột phải vào service → **Attach volume** → Mount path: `/data` (để dữ liệu không mất khi khởi động lại).
 4. Tab **Settings → Networking → Generate Domain** → nhận link web dạng `https://xxx.up.railway.app`.
 5. **Tắt `main.py` trên máy mình** – cùng một token chỉ được chạy ở 1 nơi.
+
+## Chạy miễn phí trên Render
+1. Vào **render.com** → đăng nhập bằng GitHub → **New → Blueprint** → chọn repo này → nhập `TELEGRAM_BOT_TOKEN` → **Apply**.
+2. Chờ 3–5 phút, Render cho link dạng `https://eiraa-ai.onrender.com`.
+3. Giữ web không ngủ: vào **uptimerobot.com** (miễn phí) → **New monitor** → HTTP(s) → URL `https://eiraa-ai.onrender.com/api/info` → 5 phút.
+4. **Tắt `main.py` trên máy mình** – cùng một token chỉ chạy 1 nơi.
+
+Lưu ý gói Free: dữ liệu bị xóa khi Render khởi động lại (hệ thống tự nạp lại dữ liệu demo).
