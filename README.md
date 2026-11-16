@@ -66,20 +66,13 @@ Khi dùng thật: tắt `main.py`, thêm dòng `DEMO_DATA=0` vào `.env`, xóa t
 
 | Sếp gõ | Bot trả về |
 |---|---|
-| **tổng hợp tin nhắn** (hôm nay / tuần này / nhóm kinh doanh…) | Tổng hợp **tin nhắn nhóm Telegram**: tóm tắt, phân loại theo nhóm công việc, đầu việc – tiến độ, vấn đề cần xử lý |
-| **tổng hợp báo cáo** (hôm nay / tuần này / tháng này…) | Tổng hợp **báo cáo nhân viên nộp trên web** |
-| ai chưa nộp báo cáo | Danh sách nhân viên chưa nộp |
-| việc nào quá hạn | Công việc quá hạn |
-| báo cáo của Lan 7 ngày qua | Báo cáo và công việc của một nhân viên |
-| gửi file đính kèm của Hùng hôm nay | Gửi lại file Excel/Word nhân viên đã nộp |
-| … gửi file excel / word / pdf | Kèm file báo cáo |
+| **tổng hợp tin nhắn** (hôm nay / tuần này / nhóm kinh doanh…) | 1 bản tổng hợp gồm: **1. Nội dung tin nhắn** các nhóm Telegram · **2. Tiến độ công việc** · **3. Nội dung các bài báo cáo** nhân viên đã nộp |
 
-Dưới mỗi bản tổng hợp có nút **📗 Excel · 📘 Word · 📕 PDF** để tải file.
+Dưới bản tổng hợp có nút **📗 Excel · 📘 Word · 📕 PDF**. File Excel có các sheet: Tổng hợp, Chi tiết, Tiến độ công việc,
+Nội dung báo cáo, Theo nhóm công việc, Tin nhắn gốc.
 
-Lệnh nhanh: `/tonghop` (tổng hợp tin nhắn – gõ trong nhóm thì tổng hợp riêng nhóm đó), `/baocao`, `/tuan`, `/thang`,
-`/xuat` (Excel + Word + PDF), `/chuanop`, `/quahan`, `/congviec`, `/trangthai`.
-
-Bot tự động (thứ 2 – thứ 7): 16:30 nhắc ai chưa nộp, 17:30 gửi tổng hợp cuối ngày (báo cáo + tin nhắn), và báo ngay khi có vấn đề mức **Cao**.
+Gõ `/tonghop` ngay trong nhóm Telegram = tổng hợp riêng nhóm đó.
+Bot tự gửi bản tổng hợp lúc 17:30 (thứ 2 – thứ 7) và báo ngay khi có vấn đề mức **Cao**.
 
 ## Lưu ý
 - Web không có đăng nhập: ai biết địa chỉ đều vào được. Chỉ nên dùng trong mạng nội bộ công ty, đừng đưa ra Internet công khai.

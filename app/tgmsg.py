@@ -83,6 +83,9 @@ HIGH_RE = re.compile(r"\b(gấp|khẩn|sự cố|nghiêm trọng|không thanh to
 PROPOSAL_RE = re.compile(r"\b(đề xuất|xin phép|xin duyệt|kiến nghị|em nghĩ nên|nên)\b", re.I)
 DEADLINE_RE = re.compile(r"(trước\s+)?(\d{1,2}h(?:\d{2})?|\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?|hôm nay|ngày mai|mai|cuối tuần|cuối tháng|thứ\s?(?:hai|ba|tư|năm|sáu|bảy|[2-7]))", re.I)
 PCT_RE = re.compile(r"(\d{1,3})\s?%")
+PROGRESS_CTX = re.compile(r"\b(đang|xong|hoàn thành|tiến độ|khoảng|được|đạt|làm)\b", re.I)
+NOT_PROGRESS = re.compile(r"\b(giảm|chiết khấu|tăng|lãi|khuyến mãi|thuế|vat)\b", re.I)
+DIRECTIVE_RE = re.compile(r"\b(cần|phải|nhờ|giao|chuẩn bị|nhắc)\b", re.I)
 MENTION_RE = re.compile(r"@(\w+)")
 QUESTION_ONLY = re.compile(r"^(ok|oke|vâng|dạ|ừ|uh|👍|cảm ơn|thanks|tks)[\s!.]*$", re.I)
 
@@ -111,15 +114,18 @@ def _rule_analyze(msgs):
         if key in seen:
             continue
         seen.add(key)
-        if ISSUE_RE.search(t):
+        resolved = bool(DONE_RE.search(t)) and not DIRECTIVE_RE.search(t)
+        if ISSUE_RE.search(t) and not resolved and not (DIRECTIVE_RE.search(t) and not HIGH_RE.search(t)):
             issues.append({"van_de": raw[:300], "nguoi_lien_quan": who,
                            "muc_do": "Cao" if HIGH_RE.search(t) else "Trung bình", "de_xuat": UNKNOWN})
         if PROPOSAL_RE.search(t):
             proposals.append({"noi_dung": raw[:300], "nguoi": who})
-        if TASK_RE.search(t) or MENTION_RE.search(raw) or PCT_RE.search(t):
+        is_issue_only = ISSUE_RE.search(t) and not DIRECTIVE_RE.search(t) and not resolved
+        is_proposal = PROPOSAL_RE.search(t) and not DIRECTIVE_RE.search(t)
+        pct = PCT_RE.search(t) if (PROGRESS_CTX.search(t) and not NOT_PROGRESS.search(t)) else None
+        if (TASK_RE.search(t) or MENTION_RE.search(raw) or pct) and not is_issue_only and not is_proposal:
             mention = MENTION_RE.search(raw)
             dl = DEADLINE_RE.search(t)
-            pct = PCT_RE.search(t)
             status = "Hoàn thành" if DONE_RE.search(t) and not re.search(r"\bcần\b|\bphải\b", t) else (
                 "Đang làm" if DOING_RE.search(t) else "Chưa làm")
             tasks.append({"cong_viec": raw[:300], "nguoi_phu_trach": mention[1] if mention else who,
@@ -140,30 +146,83 @@ def _rule_analyze(msgs):
             "dau_viec": tasks, "van_de": issues, "de_xuat": proposals, "thong_tin_quan_trong": [], "ai": False}
 
 
+# ======================= Nội dung báo cáo & tiến độ =======================
+def _cell(v):
+    v = v.strip()
+    if re.fullmatch(r"\d{4,}(\.0)?", v):                 # 80000000 -> 80.000.000
+        return f"{int(float(v)):,}".replace(",", ".")
+    return v
+
+
+def _excerpt(text, limit=220):
+    """Lấy phần nội dung chính trong file báo cáo, dễ đọc (bảng Excel -> 'ô – ô – ô')."""
+    out, header_skipped = [], False
+    for raw in (text or "").splitlines():
+        x = re.sub(r"\s+", " ", raw).strip()
+        if not x or x.startswith("[Sheet"):
+            continue
+        if " | " in x:                                         # dòng của bảng
+            if not header_skipped:                             # bỏ dòng tiêu đề cột
+                header_skipped = True
+                continue
+            cells = [_cell(c) for c in x.split("|") if c.strip()]
+            x = " – ".join(cells)
+        out.append(x)
+    if len(out) > 1:
+        out = out[1:]                                          # bỏ dòng tiêu đề file
+    text = " · ".join(out)
+    return (text[:limit].rsplit(" ", 1)[0] + "…") if len(text) > limit else text
+
+
+def _reports_part(start, end, department=None):
+    data = summary.collect(start, end, department)
+    reports = []
+    for r in data["reports"]:
+        atts = r.get("attachments", [])
+        subjects = [a.get("subject") or a["filename"] for a in atts] or [x for x in r["done"].splitlines() if x.strip()]
+        content = " | ".join(_excerpt(a.get("content")) for a in atts if a.get("content")) or r["done"]
+        reports.append({"nguoi": r["full_name"], "phong": r["department"] or "", "ngay": r["report_date"],
+                        "chu_de": "; ".join(dict.fromkeys(subjects)), "noi_dung": content[:500],
+                        "tep": ", ".join(a["filename"] for a in atts), "tien_do": r["progress"],
+                        "van_de": r["issues"], "muc_do": r["issue_level"]})
+    tasks = data["tasks"]
+    today = db.today().isoformat()
+    for t in tasks:
+        t["qua_han"] = t["status"] != "Hoàn thành" and bool(t["deadline"]) and t["deadline"] < today
+    return {"reports": reports, "missing": data["missing"], "staff": data["staff"], "tasks": tasks}
+
+
 # ======================= Phân tích bằng ChatGPT =======================
-PROMPT = """Bạn là EIRAA AI – trợ lý tổng hợp cho giám đốc. Dưới đây là tin nhắn trao đổi trong các nhóm Telegram công ty
-(định dạng: [nhóm] [giờ] người gửi: nội dung). Viết tiếng Việt, ngắn gọn.
-QUY TẮC: chỉ dùng thông tin có trong tin nhắn, KHÔNG suy diễn; thiếu thông tin ghi "Chưa xác định".
+PROMPT = """Bạn là EIRAA AI – trợ lý tổng hợp cho giám đốc. Dữ liệu gồm 3 phần: (1) tin nhắn trao đổi trong các nhóm Telegram,
+(2) tiến độ công việc được giao, (3) nội dung các bài báo cáo nhân viên nộp (file Excel/Word). Viết tiếng Việt, ngắn gọn.
+QUY TẮC: chỉ dùng thông tin có trong dữ liệu, KHÔNG suy diễn; thiếu thông tin ghi "Chưa xác định".
 Trả về JSON:
-{"tom_tat": "5-8 câu: nội dung chính, kết quả, điểm cần sếp chú ý",
+{"tom_tat": "6-10 câu tổng hợp CHUNG cả tin nhắn, tiến độ công việc và báo cáo: kết quả nổi bật, việc chậm, điểm sếp cần chú ý",
  "theo_nhom": [{"ten": "nhóm công việc (Kinh doanh, Kỹ thuật, Tài chính, Nhân sự, Marketing, ...)", "noi_dung": ["ý chính"]}],
- "dau_viec": [{"cong_viec": "...", "nguoi_phu_trach": "...", "thoi_han": "...", "trang_thai": "Chưa làm|Đang làm|Hoàn thành", "tien_do": "vd 60%"}],
+ "dau_viec": [{"cong_viec": "việc nhắc tới trong tin nhắn", "nguoi_phu_trach": "...", "thoi_han": "...", "trang_thai": "Chưa làm|Đang làm|Hoàn thành", "tien_do": "vd 60%"}],
  "van_de": [{"van_de": "...", "nguoi_lien_quan": "...", "muc_do": "Cao|Trung bình|Thấp", "de_xuat": "..."}],
  "de_xuat": [{"noi_dung": "...", "nguoi": "..."}],
- "thong_tin_quan_trong": ["thông tin quan trọng khác cần đưa vào báo cáo"]}"""
+ "bao_cao": [{"nguoi": "tên người nộp", "noi_dung_chinh": "1-2 câu tóm tắt nội dung bài báo cáo của người đó"}],
+ "thong_tin_quan_trong": ["thông tin quan trọng khác"]}"""
 
 
-def _ai_analyze(msgs):
+def _ai_analyze(msgs, part):
     c = ai.client()
     if not c:
         return None
-    text = "\n".join(f"[{m['chat_title']}] [{m['sent_at'][5:10]} {m['sent_at'][11:16]}] {_short(m['user_name'])}: {m['text']}"
-                     for m in msgs)
+    text = ["(1) TIN NHẮN:"] + [f"[{m['chat_title']}] [{m['sent_at'][5:10]} {m['sent_at'][11:16]}] {_short(m['user_name'])}: {m['text']}"
+                                 for m in msgs]
+    text += ["", "(2) TIẾN ĐỘ CÔNG VIỆC:"] + [f"- {t['title']} – {t['assignee']} – hạn {t['deadline'] or 'chưa có'} – {t['status']} {t['progress']}%"
+                                             + (" – QUÁ HẠN" if t["qua_han"] else "") for t in part["tasks"]]
+    text += ["", "(3) BÁO CÁO ĐÃ NỘP:"] + [f"- {r['nguoi']} ({r['phong']}) [{r['ngay']}] chủ đề: {r['chu_de']}\n  Nội dung: {r['noi_dung']}"
+                                          for r in part["reports"]]
+    text += ["Chưa nộp: " + (", ".join(m["full_name"] for m in part["missing"]) or "không")]
     try:
         r = c.chat.completions.create(model=ai.model(), temperature=0.2, response_format={"type": "json_object"},
-                                      messages=[{"role": "system", "content": PROMPT}, {"role": "user", "content": text[-100_000:]}])
+                                      messages=[{"role": "system", "content": PROMPT},
+                                                {"role": "user", "content": "\n".join(text)[-100_000:]}])
         d = json.loads(r.choices[0].message.content)
-        for k in ("theo_nhom", "dau_viec", "van_de", "de_xuat", "thong_tin_quan_trong"):
+        for k in ("theo_nhom", "dau_viec", "van_de", "de_xuat", "bao_cao", "thong_tin_quan_trong"):
             d[k] = d.get(k) or []
         d["tom_tat"] = d.get("tom_tat") or ""
         d["ai"] = True
@@ -173,63 +232,124 @@ def _ai_analyze(msgs):
         return None
 
 
-# ======================= Dựng báo cáo =======================
+# ======================= Dựng bản tổng hợp =======================
 def build(period_text="hôm nay", chat_ids=None):
     start, end, label = summary.parse_period(period_text)
     chat_ids = chat_ids if chat_ids is not None else (find_chats(period_text) or None)
+    department = summary.find_department(period_text)
     msgs = get_messages(start, end, chat_ids)
-    a = (_ai_analyze(msgs) if msgs else None) or _rule_analyze(msgs)
+    part = _reports_part(start, end, department)
+    a = ((_ai_analyze(msgs, part) if (msgs or part["reports"]) else None) or _rule_analyze(msgs))
     chats = sorted({m["chat_title"] or str(m["chat_id"]) for m in msgs})
     users = sorted({_short(m["user_name"]) for m in msgs})
-    rows = [{"hang_muc": "Công việc", "noi_dung": t.get("cong_viec", ""), "nguoi": t.get("nguoi_phu_trach") or UNKNOWN,
+    tasks = part["tasks"]
+    t_done = [t for t in tasks if t["status"] == "Hoàn thành"]
+    t_doing = [t for t in tasks if t["status"] == "Đang làm" and not t["qua_han"]]
+    t_todo = [t for t in tasks if t["status"] not in ("Hoàn thành", "Đang làm") and not t["qua_han"]]
+    t_late = [t for t in tasks if t["qua_han"]]
+    reps, missing, staff = part["reports"], part["missing"], part["staff"]
+    ai_report = {x.get("nguoi"): x.get("noi_dung_chinh") for x in a.get("bao_cao", [])}
+    for r in reps:
+        r["tom_tat"] = ai_report.get(r["nguoi"]) or r["noi_dung"]
+
+    if not a.get("ai"):   # tóm tắt chung khi chưa có AI
+        parts = [a["tom_tat"]] if msgs else ["Chưa có tin nhắn nhóm trong kỳ."]
+        parts.append(f"Báo cáo: {len({r['nguoi'] for r in reps})}/{len(staff)} nhân viên đã nộp ({len(reps)} bài).")
+        parts.append(f"Công việc: {len(t_done)} hoàn thành, {len(t_doing)} đang làm, {len(t_todo)} chưa làm, {len(t_late)} quá hạn.")
+        a["tom_tat"] = " ".join(parts)
+
+    rows = [{"hang_muc": "Tin nhắn – việc", "noi_dung": t.get("cong_viec", ""), "nguoi": t.get("nguoi_phu_trach") or UNKNOWN,
              "thoi_han": t.get("thoi_han") or UNKNOWN,
              "trang_thai": (t.get("trang_thai") or UNKNOWN) + (f" ({t['tien_do']})" if t.get("tien_do") else "")} for t in a["dau_viec"]]
     rows += [{"hang_muc": "Vấn đề", "noi_dung": v.get("van_de", ""), "nguoi": v.get("nguoi_lien_quan") or UNKNOWN,
               "thoi_han": UNKNOWN, "trang_thai": f"Cần xử lý – mức {v.get('muc_do') or UNKNOWN}"} for v in a["van_de"]]
     rows += [{"hang_muc": "Đề xuất", "noi_dung": p.get("noi_dung", ""), "nguoi": p.get("nguoi") or UNKNOWN,
               "thoi_han": UNKNOWN, "trang_thai": "Chờ xác nhận"} for p in a["de_xuat"]]
-    done = sum(1 for t in a["dau_viec"] if t.get("trang_thai") == "Hoàn thành")
-    high = sum(1 for v in a["van_de"] if v.get("muc_do") == "Cao")
-    scope = (" – " + ", ".join(chats).upper()) if chat_ids and chats else ""
+    rows += [{"hang_muc": "Tiến độ", "noi_dung": t["title"], "nguoi": t["assignee"] or UNKNOWN,
+              "thoi_han": summary._fmt_date(t["deadline"]),
+              "trang_thai": f"{'QUÁ HẠN – ' if t['qua_han'] else ''}{t['status']} ({t['progress']}%)"} for t in tasks]
+    rows += [{"hang_muc": "Báo cáo", "noi_dung": f"{r['chu_de']}: {r['tom_tat']}", "nguoi": r["nguoi"],
+              "thoi_han": summary._fmt_date(r["ngay"]), "trang_thai": "Đã nộp"} for r in reps]
+    rows += [{"hang_muc": "Chưa nộp", "noi_dung": f"Chưa nộp báo cáo ({m['ngay_thieu']})", "nguoi": m["full_name"],
+              "thoi_han": UNKNOWN, "trang_thai": "Chưa nộp"} for m in missing]
+
+    scope = (" – " + ", ".join(chats).upper()) if chat_ids and chats else (f" – {department.upper()}" if department else "")
     return {
-        "kind": "tin_nhan", "title": f"TỔNG HỢP TIN NHẮN TELEGRAM {label.upper()}{scope}", "label": label,
-        "generated_at": db.now().strftime("%H:%M %d/%m/%Y"), "source": "tin nhắn nhóm Telegram",
-        "stat_lines": [("Số tin nhắn", len(msgs)), ("Số nhóm", len(chats)), ("Người tham gia", len(users)),
-                       ("Đầu việc", len(a["dau_viec"])), ("Đã hoàn thành", done), ("Vấn đề cần xử lý", len(a["van_de"])),
-                       ("Vấn đề mức cao", high)],
-        "group_label": "Theo nhóm công việc",
+        "kind": "tin_nhan", "title": f"TỔNG HỢP TIN NHẮN & TIẾN ĐỘ CÔNG VIỆC {label.upper()}{scope}", "label": label,
+        "generated_at": db.now().strftime("%H:%M %d/%m/%Y"), "source": "tin nhắn nhóm Telegram + tiến độ công việc + báo cáo nhân viên",
+        "stat_lines": [("Tin nhắn", len(msgs)), ("Nhóm Telegram", len(chats)),
+                       ("Đã nộp báo cáo", f"{len({r['nguoi'] for r in reps})}/{len(staff)}"),
+                       ("Việc hoàn thành", len(t_done)), ("Việc đang làm", len(t_doing)), ("Việc quá hạn", len(t_late)),
+                       ("Vấn đề cần xử lý", len(a["van_de"]))],
+        "group_label": "Nội dung tin nhắn theo nhóm công việc",
         "theo_phong_ban": [{"ten": g["ten"], "tom_tat": "; ".join(g.get("noi_dung", [])[:6])} for g in a["theo_nhom"]],
-        "rui_ro": [f"[{v.get('muc_do') or UNKNOWN}] {v.get('nguoi_lien_quan') or ''}: {v.get('van_de', '')}" for v in a["van_de"]][:10],
+        "rui_ro": [f"[{v.get('muc_do') or UNKNOWN}] {v.get('nguoi_lien_quan') or ''}: {v.get('van_de', '')}" for v in a["van_de"]][:10]
+                  + [f"Quá hạn: {t['title']} ({t['assignee']}, hạn {summary._fmt_date(t['deadline'])})" for t in t_late],
         "goi_y": a.get("thong_tin_quan_trong", [])[:5],
         "tom_tat": a["tom_tat"], "ai": a.get("ai", False), "rows": rows,
-        "analysis": a, "messages": msgs, "chats": chats,
+        "analysis": a, "messages": msgs, "chats": chats, "users": users,
+        "task_groups": {"done": t_done, "doing": t_doing, "todo": t_todo, "late": t_late},
+        "report_items": reps, "missing_staff": missing, "staff_count": len(staff),
+        "extra_sheets": [
+            ("Tiến độ công việc", ["Công việc", "Phụ trách", "Phòng ban", "Hạn", "Trạng thái", "Tiến độ %", "Quá hạn"],
+             [[t["title"], t["assignee"], t["department"], summary._fmt_date(t["deadline"]), t["status"], t["progress"],
+               "Có" if t["qua_han"] else ""] for t in tasks], [44, 22, 16, 12, 14, 10, 9]),
+            ("Nội dung báo cáo", ["Ngày", "Người nộp", "Phòng ban", "Chủ đề", "Nội dung chính", "Tệp"],
+             [[summary._fmt_date(r["ngay"]), r["nguoi"], r["phong"], r["chu_de"], r["tom_tat"], r["tep"]] for r in reps],
+             [12, 20, 14, 32, 80, 28]),
+            ("Theo nhóm công việc", ["Nhóm công việc", "Nội dung tin nhắn"],
+             [[g["ten"], x] for g in a["theo_nhom"] for x in g.get("noi_dung", [])], [26, 100]),
+            ("Tin nhắn gốc", ["Thời gian", "Nhóm", "Người gửi", "Nội dung"],
+             [[m["sent_at"][:16].replace("T", " "), m.get("chat_title") or "", m["user_name"], m["text"]] for m in msgs],
+             [17, 22, 22, 100]),
+        ],
         "stats": {}, "missing": [], "overdue": [], "open_tasks": [], "reports": [],
     }
 
 
 def to_message(rep, detail=True):
-    a = rep["analysis"]
-    s = dict(rep["stat_lines"])
-    if not rep["messages"]:
-        return (f"💬 {rep['title']}\n\nChưa có tin nhắn nào trong {rep['label']}.\n"
-                "Hãy thêm bot vào nhóm Telegram (và tắt Privacy Mode trong @BotFather) để bot ghi nhận tin nhắn.")
-    L = [f"💬 {rep['title']}", f"🕒 Lập lúc {rep['generated_at']}" + ("" if rep.get("ai") else " · chế độ cơ bản (chưa bật AI)"), "",
-         f"📨 {s['Số tin nhắn']} tin nhắn · 👥 {s['Người tham gia']} người · 💬 {s['Số nhóm']} nhóm: {', '.join(rep['chats'])}",
-         "", "📝 TÓM TẮT", rep["tom_tat"]]
-    if detail and a["theo_nhom"]:
-        L += ["", "📂 PHÂN LOẠI THEO NHÓM CÔNG VIỆC"]
-        for g in a["theo_nhom"][:6]:
-            L.append(f"▸ {g['ten']} ({len(g.get('noi_dung', []))})")
-            L += [f"   • {x[:140]}" for x in g.get("noi_dung", [])[:3]]
+    a, tg = rep["analysis"], rep["task_groups"]
+    msgs, reps = rep["messages"], rep["report_items"]
+    L = [f"📊 {rep['title']}", f"🕒 Lập lúc {rep['generated_at']}" + ("" if rep.get("ai") else " · chế độ cơ bản (chưa bật AI)"),
+         "", "📝 TÓM TẮT CHUNG", rep["tom_tat"]]
+
+    # 1. Nội dung tin nhắn
+    L += ["", "━━━━━━━━━━━━━━", f"1️⃣ NỘI DUNG TIN NHẮN ({len(msgs)} tin · {len(rep['chats'])} nhóm)"]
+    if not msgs:
+        L.append("Chưa có tin nhắn nào. Thêm bot vào nhóm Telegram (tắt Privacy Mode trong @BotFather) để bot ghi nhận.")
+    else:
+        L.append("Nhóm: " + ", ".join(rep["chats"]))
+        for g in a["theo_nhom"][:5]:
+            items = g.get("noi_dung", [])
+            L.append(f"▸ {g['ten']} ({len(items)})")
+            L += [f"   • {x[:140]}" for x in items[:2]]
+        if a["van_de"]:
+            L += ["⚠️ Vấn đề cần xử lý:"] + [f"   • [{v.get('muc_do') or UNKNOWN}] {v.get('nguoi_lien_quan') or ''}: {v.get('van_de', '')[:140]}"
+                                         for v in sorted(a["van_de"], key=lambda v: v.get("muc_do") != "Cao")[:5]]
+        if a["de_xuat"]:
+            L += ["💡 Đề xuất:"] + [f"   • {p.get('nguoi') or ''}: {p.get('noi_dung', '')[:140]}" for p in a["de_xuat"][:3]]
+
+    # 2. Tiến độ công việc
+    L += ["", "━━━━━━━━━━━━━━",
+          f"2️⃣ TIẾN ĐỘ CÔNG VIỆC (✅ {len(tg['done'])} xong · ⏳ {len(tg['doing'])} đang làm · 🔲 {len(tg['todo'])} chưa làm · ⏰ {len(tg['late'])} quá hạn)"]
+    fmt = lambda t, ic: f"{ic} {t['title']} — {t['assignee'] or UNKNOWN} · {t['progress']}% · hạn {summary._fmt_date(t['deadline'])}"
+    L += [fmt(t, "⏰") for t in tg["late"]] + [fmt(t, "⏳") for t in tg["doing"]] + [fmt(t, "🔲") for t in tg["todo"]] + [fmt(t, "✅") for t in tg["done"]]
     if a["dau_viec"]:
         icon = {"Hoàn thành": "✅", "Đang làm": "⏳"}
-        L += ["", f"📌 ĐẦU VIỆC & TIẾN ĐỘ ({len(a['dau_viec'])})"] + [
-            f"{icon.get(t.get('trang_thai'), '🔲')} {t.get('cong_viec', '')[:150]} — {t.get('nguoi_phu_trach') or UNKNOWN}"
-            + (f" | hạn: {t['thoi_han']}" if t.get("thoi_han") and t["thoi_han"] != UNKNOWN else "")
-            + (f" | {t['tien_do']}" if t.get("tien_do") else "") for t in a["dau_viec"][:12]]
-    if a["van_de"]:
-        L += ["", f"⚠️ VẤN ĐỀ CẦN XỬ LÝ ({len(a['van_de'])})"] + [
-            f"• [{v.get('muc_do') or UNKNOWN}] {v.get('nguoi_lien_quan') or ''}: {v.get('van_de', '')[:160]}" for v in a["van_de"][:8]]
-    if a["de_xuat"]:
-        L += ["", "💡 ĐỀ XUẤT"] + [f"• {p.get('nguoi') or ''}: {p.get('noi_dung', '')[:160]}" for p in a["de_xuat"][:5]]
+        L += ["Cập nhật từ tin nhắn:"] + [
+            f"   {icon.get(t.get('trang_thai'), '🔲')} {t.get('cong_viec', '')[:130]} — {t.get('nguoi_phu_trach') or UNKNOWN}"
+            + (f" · {t['tien_do']}" if t.get("tien_do") else "") for t in a["dau_viec"][:6]]
+
+    # 3. Nội dung các bài báo cáo
+    L += ["", "━━━━━━━━━━━━━━", f"3️⃣ NỘI DUNG BÁO CÁO ({len({r['nguoi'] for r in reps})}/{rep['staff_count']} người đã nộp)"]
+    if not reps:
+        L.append("Chưa có báo cáo nào trong kỳ.")
+    for r in reps[:15]:
+        day = f"[{r['ngay'][8:10]}/{r['ngay'][5:7]}] " if rep["label"] and not rep["label"].startswith("hôm") else ""
+        L.append(f"📄 {day}{r['nguoi']} – {r['chu_de']}")
+        L.append(f"   {r['tom_tat'] if len(r['tom_tat']) <= 230 else r['tom_tat'][:230].rsplit(' ', 1)[0] + '…'}")
+    if len(reps) > 15:
+        L.append(f"… và {len(reps) - 15} báo cáo khác (xem file Excel)")
+    if rep["missing_staff"]:
+        L.append("❌ Chưa nộp: " + ", ".join(m["full_name"] for m in rep["missing_staff"]))
     return "\n".join(L)

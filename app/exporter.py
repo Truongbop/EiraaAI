@@ -47,7 +47,8 @@ def _table_rows(rep):
 FILL = PatternFill("solid", fgColor="1F4E78")
 THIN = Side(style="thin", color="B7B7B7")
 BOX = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
-CAT_FILL = {"Vấn đề": "FDE9E7", "Quá hạn": "FCE4D6", "Đề xuất": "FFF2CC", "Công việc": "FFFFFF"}
+CAT_FILL = {"Vấn đề": "FDE9E7", "Quá hạn": "FCE4D6", "Đề xuất": "FFF2CC", "Công việc": "FFFFFF",
+            "Tiến độ": "EAF2FB", "Báo cáo": "E9F7EF", "Chưa nộp": "FCE4D6", "Tin nhắn – việc": "FFFFFF"}
 
 
 def _sheet(ws, headers, data, widths, color_col=None):
@@ -89,11 +90,8 @@ def to_xlsx(rep, path):
 
     _sheet(wb.create_sheet("Chi tiết"), HEAD, _table_rows(rep), [6, 12, 70, 26, 14, 26], color_col=1)
     if _is_msg(rep):
-        _sheet(wb.create_sheet("Theo nhóm công việc"), ["Nhóm công việc", "Nội dung"],
-               [[g["ten"], x] for g in rep["analysis"]["theo_nhom"] for x in g.get("noi_dung", [])], [26, 100])
-        _sheet(wb.create_sheet("Tin nhắn gốc"), ["Thời gian", "Nhóm", "Người gửi", "Nội dung"],
-               [[m["sent_at"][:16].replace("T", " "), m.get("chat_title") or "", m["user_name"], m["text"]] for m in rep["messages"]],
-               [17, 22, 22, 100])
+        for name, headers, data, widths in rep.get("extra_sheets", []):
+            _sheet(wb.create_sheet(name), headers, data, widths)
         wb.save(path)
         return
     _sheet(wb.create_sheet("Báo cáo nhân viên"),

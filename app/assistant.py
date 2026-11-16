@@ -128,8 +128,8 @@ TOOLS = [
                                                          "ky": {"type": "string"}}}}},
     {"type": "function", "function": {
         "name": "tong_hop_tin_nhan",
-        "description": "Tổng hợp / tóm tắt TIN NHẮN TRAO ĐỔI trong các nhóm Telegram: phân loại theo nhóm công việc, "
-                       "đầu việc, tiến độ, vấn đề cần xử lý, đề xuất. Dùng khi sếp hỏi về tin nhắn, nhóm, trao đổi, chat.",
+        "description": "Tổng hợp TIN NHẮN các nhóm Telegram + TIẾN ĐỘ CÔNG VIỆC + NỘI DUNG CÁC BÀI BÁO CÁO nhân viên nộp. "
+                       "Dùng khi sếp gõ 'tổng hợp tin nhắn' hoặc hỏi về tin nhắn, nhóm, trao đổi, tiến độ chung.",
         "parameters": {"type": "object", "properties": {
             "ky": {"type": "string", "description": "hôm nay | hôm qua | tuần này | tháng này | dd/mm/yyyy | N ngày"},
             "nhom": {"type": "string", "description": "Tên nhóm Telegram nếu sếp chỉ định"},

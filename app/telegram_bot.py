@@ -18,32 +18,21 @@ from .config import VN_TZ
 log = logging.getLogger("eiraa.bot")
 APP: Application | None = None
 
-HELP = """🤖 EIRAA AI – trợ lý báo cáo của sếp
+HELP = """🤖 EIRAA AI – trợ lý tổng hợp của sếp
 
-📌 2 LỆNH CHÍNH
-┌ Sếp gõ: tổng hợp tin nhắn
-└ Bot trả về: tổng hợp tin nhắn các nhóm Telegram
-┌ Sếp gõ: tổng hợp báo cáo
-└ Bot trả về: tổng hợp báo cáo nhân viên nộp trên web
+📌 Sếp gõ: tổng hợp tin nhắn
+Bot gửi về 1 bản tổng hợp gồm:
+1️⃣ Nội dung tin nhắn các nhóm Telegram (phân loại theo nhóm công việc, vấn đề cần xử lý)
+2️⃣ Tiến độ công việc (xong / đang làm / quá hạn, % tiến độ)
+3️⃣ Nội dung các bài báo cáo nhân viên đã nộp (và ai chưa nộp)
 
-Có thể thêm thời gian / nhóm, ví dụ:
-• tổng hợp tin nhắn hôm nay / hôm qua / tuần này
+Có thể thêm thời gian hoặc nhóm:
+• tổng hợp tin nhắn hôm nay / hôm qua / tuần này / tháng này
 • tổng hợp tin nhắn nhóm kinh doanh tuần này
-• tổng hợp báo cáo tháng này gửi file excel
+• tổng hợp tin nhắn tuần này gửi file excel
 
-Hỏi thêm:
-• ai chưa nộp báo cáo
-• việc nào đang quá hạn
-• báo cáo của Lan 7 ngày qua
-• gửi file đính kèm của Hùng hôm nay
-
-Lệnh nhanh:
-/tonghop – tổng hợp tin nhắn (gõ trong nhóm = tổng hợp riêng nhóm đó)
-/baocao – tổng hợp báo cáo · /tuan · /thang
-/xuat – gửi file Excel + Word + PDF
-/chuanop · /quahan · /congviec · /trangthai
-
-Dưới mỗi bản tổng hợp có nút 📗 Excel · 📘 Word · 📕 PDF để tải file."""
+Dưới bản tổng hợp có nút 📗 Excel · 📘 Word · 📕 PDF để tải file.
+Gõ /tonghop ngay trong nhóm = tổng hợp riêng nhóm đó."""
 
 
 # ---------- Quyền: chỉ sếp mới dùng được ----------
@@ -92,7 +81,21 @@ EXPORT_KB = InlineKeyboardMarkup([[InlineKeyboardButton("📗 Excel", callback_d
 
 async def send_reply(bot, chat_id, reply: assistant.Reply, keyboard=None):
     text = reply.text or "(không có nội dung)"
-    chunks = [text[i:i + 4000] for i in range(0, len(text), 4000)]
+    chunks, cur = [], ""                              # cắt theo dòng, mỗi phần < 3900 ký tự
+    for line in text.split("\n"):
+        while len(line) > 3900:                      # dòng quá dài (hiếm)
+            if cur:
+                chunks.append(cur)
+                cur = ""
+            chunks.append(line[:3900])
+            line = line[3900:]
+        if cur and len(cur) + len(line) + 1 > 3900:
+            chunks.append(cur)
+            cur = line
+        else:
+            cur = f"{cur}\n{line}" if cur else line
+    if cur:
+        chunks.append(cur)
     for i, ch in enumerate(chunks):
         await bot.send_message(chat_id, ch, reply_markup=keyboard if i == len(chunks) - 1 else None)
     for f in reply.files:
@@ -218,7 +221,7 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     fmt = q.data.split(":", 1)[1]
     formats = ["xlsx", "docx", "pdf", "txt"] if fmt == "all" else [fmt]
     period = ctx.user_data.get("last_period", "hôm nay")
-    func = _msg_files_only if ctx.user_data.get("last_kind") == "msg" else _report_files_only
+    func = _report_files_only if ctx.user_data.get("last_kind") == "report" else _msg_files_only
     await run_and_send(update, ctx, func, period, formats)
 
 
@@ -230,7 +233,7 @@ def _report_files_only(period_text, formats):
 
 def _msg_files_only(period_text, formats):
     rep = tgmsg.build(period_text)
-    return assistant.Reply(f"📎 File tổng hợp tin nhắn {rep['label']}:", exporter.export(rep, formats))
+    return assistant.Reply(f"📎 File tổng hợp tin nhắn & tiến độ công việc {rep['label']}:", exporter.export(rep, formats))
 
 
 def _msg_report(period_text, chat_ids=None, formats=None):
@@ -316,12 +319,9 @@ async def notify_bosses(text, files=None, keyboard=None):
 
 
 async def job_daily(ctx):
-    reply = await asyncio.to_thread(_report, "hôm nay")
-    msg_rep = await asyncio.to_thread(tgmsg.build, "hôm nay")
+    rep = await asyncio.to_thread(tgmsg.build, "hôm nay")
     for bid in boss_ids():
-        await send_reply(ctx.bot, bid, assistant.Reply("⏰ Báo cáo tự động cuối ngày\n\n" + reply.text), EXPORT_KB)
-        if msg_rep["messages"]:
-            await send_reply(ctx.bot, bid, assistant.Reply(tgmsg.to_message(msg_rep)))
+        await send_reply(ctx.bot, bid, assistant.Reply("⏰ Tổng hợp tự động cuối ngày\n\n" + tgmsg.to_message(rep)), EXPORT_KB)
 
 
 async def job_remind(ctx):
