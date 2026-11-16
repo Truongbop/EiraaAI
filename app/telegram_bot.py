@@ -20,29 +20,30 @@ APP: Application | None = None
 
 HELP = """🤖 EIRAA AI – trợ lý báo cáo của sếp
 
-Sếp cứ nhắn tự nhiên, ví dụ:
-• tổng hợp báo cáo hôm nay
-• báo cáo tuần này gửi file excel
+📌 2 LỆNH CHÍNH
+┌ Sếp gõ: tổng hợp tin nhắn
+└ Bot trả về: tổng hợp tin nhắn các nhóm Telegram
+┌ Sếp gõ: tổng hợp báo cáo
+└ Bot trả về: tổng hợp báo cáo nhân viên nộp trên web
+
+Có thể thêm thời gian / nhóm, ví dụ:
+• tổng hợp tin nhắn hôm nay / hôm qua / tuần này
+• tổng hợp tin nhắn nhóm kinh doanh tuần này
+• tổng hợp báo cáo tháng này gửi file excel
+
+Hỏi thêm:
 • ai chưa nộp báo cáo
 • việc nào đang quá hạn
-• tình hình phòng kinh doanh tháng này
 • báo cáo của Lan 7 ngày qua
 • gửi file đính kèm của Hùng hôm nay
 
-💬 Tin nhắn nhóm Telegram (thêm bot vào nhóm):
-• tổng hợp tin nhắn hôm nay
-• tóm tắt tin nhắn nhóm kinh doanh tuần này
-• đầu việc và vấn đề trong tin nhắn hôm nay
-• /tonghop [kỳ] – tổng hợp tin nhắn các nhóm
-
 Lệnh nhanh:
-/baocao [kỳ] – tổng hợp (mặc định hôm nay), vd /baocao tuần trước
-/tuan  /thang – báo cáo tuần / tháng
-/xuat [kỳ] – gửi file Excel + Word + PDF
-/chuanop – ai chưa nộp báo cáo hôm nay
-/quahan – công việc quá hạn
-/congviec – công việc đang mở
-/trangthai – trạng thái hệ thống"""
+/tonghop – tổng hợp tin nhắn (gõ trong nhóm = tổng hợp riêng nhóm đó)
+/baocao – tổng hợp báo cáo · /tuan · /thang
+/xuat – gửi file Excel + Word + PDF
+/chuanop · /quahan · /congviec · /trangthai
+
+Dưới mỗi bản tổng hợp có nút 📗 Excel · 📘 Word · 📕 PDF để tải file."""
 
 
 # ---------- Quyền: chỉ sếp mới dùng được ----------

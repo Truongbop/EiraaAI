@@ -63,15 +63,23 @@ Khi dùng thật: tắt `main.py`, thêm dòng `DEMO_DATA=0` vào `.env`, xóa t
    hoặc gõ `/tonghop` ngay trong nhóm. Bot tóm tắt, phân loại theo nhóm công việc, liệt kê đầu việc – tiến độ – vấn đề cần xử lý.
 
 ## Sếp dùng trên Telegram
-Nhắn tự nhiên, ví dụ:
-- *tổng hợp báo cáo hôm nay / tuần này / tháng trước*
-- *báo cáo tuần gửi file excel*
-- *ai chưa nộp báo cáo*, *việc nào quá hạn*
-- *báo cáo của Lan 7 ngày qua*, *gửi file đính kèm của Hùng hôm nay*
 
-Lệnh nhanh: `/baocao`, `/tuan`, `/thang`, `/xuat` (Excel + Word + PDF), `/chuanop`, `/quahan`, `/congviec`, `/trangthai`.
+| Sếp gõ | Bot trả về |
+|---|---|
+| **tổng hợp tin nhắn** (hôm nay / tuần này / nhóm kinh doanh…) | Tổng hợp **tin nhắn nhóm Telegram**: tóm tắt, phân loại theo nhóm công việc, đầu việc – tiến độ, vấn đề cần xử lý |
+| **tổng hợp báo cáo** (hôm nay / tuần này / tháng này…) | Tổng hợp **báo cáo nhân viên nộp trên web** |
+| ai chưa nộp báo cáo | Danh sách nhân viên chưa nộp |
+| việc nào quá hạn | Công việc quá hạn |
+| báo cáo của Lan 7 ngày qua | Báo cáo và công việc của một nhân viên |
+| gửi file đính kèm của Hùng hôm nay | Gửi lại file Excel/Word nhân viên đã nộp |
+| … gửi file excel / word / pdf | Kèm file báo cáo |
 
-Bot tự động (từ thứ 2 đến thứ 7): 16:30 nhắc ai chưa nộp, 17:30 gửi tổng hợp cuối ngày, và báo ngay khi có vấn đề mức **Cao**.
+Dưới mỗi bản tổng hợp có nút **📗 Excel · 📘 Word · 📕 PDF** để tải file.
+
+Lệnh nhanh: `/tonghop` (tổng hợp tin nhắn – gõ trong nhóm thì tổng hợp riêng nhóm đó), `/baocao`, `/tuan`, `/thang`,
+`/xuat` (Excel + Word + PDF), `/chuanop`, `/quahan`, `/congviec`, `/trangthai`.
+
+Bot tự động (thứ 2 – thứ 7): 16:30 nhắc ai chưa nộp, 17:30 gửi tổng hợp cuối ngày (báo cáo + tin nhắn), và báo ngay khi có vấn đề mức **Cao**.
 
 ## Lưu ý
 - Web không có đăng nhập: ai biết địa chỉ đều vào được. Chỉ nên dùng trong mạng nội bộ công ty, đừng đưa ra Internet công khai.
