@@ -3,14 +3,16 @@ import asyncio
 import logging
 import re
 import secrets
+from pathlib import Path
 from datetime import time
 from pathlib import Path
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ChatAction, ChatType
-from telegram.ext import (Application, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters)
+from telegram.ext import (Application, CallbackQueryHandler, ChatMemberHandler, CommandHandler, ContextTypes,
+                          MessageHandler, filters)
 
-from . import ai, assistant, db, exporter, settings, summary
+from . import ai, assistant, db, exporter, files, settings, summary, tgmsg
 from .config import VN_TZ
 
 log = logging.getLogger("eiraa.bot")
@@ -26,6 +28,12 @@ Sếp cứ nhắn tự nhiên, ví dụ:
 • tình hình phòng kinh doanh tháng này
 • báo cáo của Lan 7 ngày qua
 • gửi file đính kèm của Hùng hôm nay
+
+💬 Tin nhắn nhóm Telegram (thêm bot vào nhóm):
+• tổng hợp tin nhắn hôm nay
+• tóm tắt tin nhắn nhóm kinh doanh tuần này
+• đầu việc và vấn đề trong tin nhắn hôm nay
+• /tonghop [kỳ] – tổng hợp tin nhắn các nhóm
 
 Lệnh nhanh:
 /baocao [kỳ] – tổng hợp (mặc định hôm nay), vd /baocao tuần trước
@@ -190,10 +198,11 @@ async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     history = ctx.user_data.setdefault("history", [])
     db.log(f"tg:{update.effective_user.id}", "sếp hỏi", q)
     ql = q.lower()
-    is_report = any(k in ql for k in ("tổng hợp", "báo cáo", "tóm tắt", "tình hình")) and \
+    is_report = any(k in ql for k in ("tổng hợp", "báo cáo", "tóm tắt", "tình hình", "phân loại", "đầu việc")) and \
         not any(k in ql for k in ("chưa nộp", "báo cáo của", "file đính kèm", "file gốc"))
     if is_report:
         ctx.user_data["last_period"] = q
+        ctx.user_data["last_kind"] = "msg" if assistant.is_message_question(ql) else "report"
     reply = await run_and_send(update, ctx, assistant.answer, q, list(history),
                                keyboard=EXPORT_KB if is_report else None)
     history += [{"role": "user", "content": q}, {"role": "assistant", "content": reply.text[:3000]}]
@@ -208,13 +217,89 @@ async def on_button(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     fmt = q.data.split(":", 1)[1]
     formats = ["xlsx", "docx", "pdf", "txt"] if fmt == "all" else [fmt]
     period = ctx.user_data.get("last_period", "hôm nay")
-    await run_and_send(update, ctx, _report_files_only, period, formats)
+    func = _msg_files_only if ctx.user_data.get("last_kind") == "msg" else _report_files_only
+    await run_and_send(update, ctx, func, period, formats)
 
 
 def _report_files_only(period_text, formats):
     start, end, label = summary.parse_period(period_text)
     rep = summary.build(start, end, label, summary.find_department(period_text))
     return assistant.Reply(f"📎 File báo cáo {label}:", exporter.export(rep, formats))
+
+
+def _msg_files_only(period_text, formats):
+    rep = tgmsg.build(period_text)
+    return assistant.Reply(f"📎 File tổng hợp tin nhắn {rep['label']}:", exporter.export(rep, formats))
+
+
+def _msg_report(period_text, chat_ids=None, formats=None):
+    rep = tgmsg.build(period_text, chat_ids)
+    return assistant.Reply(tgmsg.to_message(rep), exporter.export(rep, formats) if formats else [])
+
+
+# ---------- Tin nhắn nhóm: ghi nhận ----------
+async def on_group_message(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Ghi lại mọi tin nhắn trong nhóm có bot (cần tắt Privacy Mode trong @BotFather)."""
+    msg, chat, user = update.effective_message, update.effective_chat, update.effective_user
+    if not msg or not user or user.is_bot:
+        return
+    tgmsg.upsert_chat(chat.id, chat.title, chat.type)
+    name = user.full_name + (f" (@{user.username})" if user.username else "")
+    text, kind, fname = msg.text or msg.caption or "", "text", None
+    doc = msg.document
+    if doc:
+        kind, fname = "file", doc.file_name or "file"
+        ext = Path(fname).suffix.lower()
+        if ext in (".docx", ".xlsx", ".pdf", ".txt", ".csv") and (doc.file_size or 0) <= 5 * 1024 * 1024:
+            try:
+                f = await doc.get_file()
+                data = bytes(await f.download_as_bytearray())
+                _, content = await asyncio.to_thread(files.save_upload, files.safe_name(fname), data)
+                text = (text + "\n" if text else "") + f"[File {fname}] " + (content or "")[:3000]
+            except Exception:
+                log.exception("Không đọc được file trong nhóm")
+                text = (text + " " if text else "") + f"[File {fname}]"
+        else:
+            text = (text + " " if text else "") + f"[File {fname}]"
+    elif msg.photo:
+        kind, text = "photo", (text or "") + " [Ảnh]"
+    if not text.strip():
+        return
+    tgmsg.save_message(chat.id, msg.message_id, user.id, name, text.strip(), msg.date, kind, fname)
+
+
+async def on_my_chat_member(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    """Bot được thêm / bị xóa khỏi nhóm."""
+    cm = update.my_chat_member
+    chat = cm.chat
+    if chat.type == ChatType.PRIVATE:
+        return
+    joined = cm.new_chat_member.status in ("member", "administrator")
+    tgmsg.upsert_chat(chat.id, chat.title, chat.type, active=joined)
+    db.log(f"tg:{cm.from_user.id}", "thêm bot vào nhóm" if joined else "xóa bot khỏi nhóm", chat.title)
+    if joined:
+        await ctx.bot.send_message(chat.id, "👋 Xin chào! Em là EIRAA AI.\nEm sẽ ghi nhận nội dung trao đổi trong nhóm để "
+                                            "tổng hợp, tóm tắt và lập báo cáo công việc cho quản lý.")
+        for bid in boss_ids():
+            try:
+                await ctx.bot.send_message(bid, f"✅ Bot đã được thêm vào nhóm “{chat.title}”. Từ giờ em ghi nhận tin nhắn nhóm này.\n"
+                                                "Nhắn “tổng hợp tin nhắn hôm nay” để xem tổng hợp.")
+            except Exception:
+                pass
+
+
+async def cmd_tonghop(update: Update, ctx):
+    """/tonghop [kỳ] – chat riêng: tổng hợp mọi nhóm; trong nhóm: tổng hợp nhóm đó (chỉ sếp)."""
+    chat = update.effective_chat
+    period = " ".join(ctx.args) or "hôm nay"
+    if chat.type == ChatType.PRIVATE:
+        if not await guard(update):
+            return
+        ctx.user_data.update(last_period=period, last_kind="msg")
+        return await run_and_send(update, ctx, _msg_report, period, keyboard=EXPORT_KB)
+    if not is_boss(update):
+        return await update.effective_message.reply_text("Chỉ quản lý mới dùng được lệnh này.")
+    await run_and_send(update, ctx, _msg_report, period, [chat.id])
 
 
 # ---------- Tự động ----------
@@ -231,8 +316,11 @@ async def notify_bosses(text, files=None, keyboard=None):
 
 async def job_daily(ctx):
     reply = await asyncio.to_thread(_report, "hôm nay")
+    msg_rep = await asyncio.to_thread(tgmsg.build, "hôm nay")
     for bid in boss_ids():
         await send_reply(ctx.bot, bid, assistant.Reply("⏰ Báo cáo tự động cuối ngày\n\n" + reply.text), EXPORT_KB)
+        if msg_rep["messages"]:
+            await send_reply(ctx.bot, bid, assistant.Reply(tgmsg.to_message(msg_rep)))
 
 
 async def job_remind(ctx):
@@ -262,6 +350,10 @@ def build(token, request=None) -> Application:
     app.add_handler(CommandHandler("quahan", cmd_quahan))
     app.add_handler(CommandHandler("congviec", cmd_congviec))
     app.add_handler(CommandHandler(["trangthai", "status"], cmd_status))
+    app.add_handler(CommandHandler(["tonghop", "tinnhan"], cmd_tonghop))
+    app.add_handler(ChatMemberHandler(on_my_chat_member, ChatMemberHandler.MY_CHAT_MEMBER))
+    app.add_handler(MessageHandler(filters.ChatType.GROUPS & ~filters.COMMAND
+                                   & (filters.TEXT | filters.CAPTION | filters.Document.ALL | filters.PHOTO), on_group_message))
     app.add_handler(CallbackQueryHandler(on_button, pattern=r"^x:"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
     app.add_error_handler(on_error)

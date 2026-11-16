@@ -55,6 +55,13 @@ Khi dùng thật: tắt `main.py`, thêm dòng `DEMO_DATA=0` vào `.env`, xóa t
 2. Sếp mở bot trên Telegram, bấm **Start**. **Người đầu tiên bấm Start sẽ thành sếp**, người khác nhắn bot bị chặn.
 3. Thêm người nhận báo cáo: người đó nhắn `/id` cho bot, điền ID vào `BOSS_TELEGRAM_IDS` trong `.env`, chạy lại.
 
+## Tổng hợp tin nhắn nhóm Telegram
+1. @BotFather → `/setprivacy` → chọn bot → **Disable** (để bot đọc được mọi tin nhắn nhóm).
+2. Thêm bot vào các nhóm Telegram của công ty (xóa và thêm lại nếu bot đã ở trong nhóm từ trước).
+3. Bot tự ghi nhận tin nhắn + file Excel/Word gửi vào nhóm.
+4. Sếp nhắn riêng bot: *tổng hợp tin nhắn hôm nay*, *tóm tắt tin nhắn nhóm kinh doanh tuần này gửi file excel*,
+   hoặc gõ `/tonghop` ngay trong nhóm. Bot tóm tắt, phân loại theo nhóm công việc, liệt kê đầu việc – tiến độ – vấn đề cần xử lý.
+
 ## Sếp dùng trên Telegram
 Nhắn tự nhiên, ví dụ:
 - *tổng hợp báo cáo hôm nay / tuần này / tháng trước*

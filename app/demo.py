@@ -175,3 +175,61 @@ def seed_if_empty():
     if not staff and not db.get_setting("demo_seeded"):
         seed()
         db.set_setting("demo_seeded", "1")
+
+
+# ======================= Tin nhắn nhóm Telegram demo =======================
+TG_DEMO = {
+    (-100900000001, "Phòng Kinh Doanh"): [
+        (0, "08:15", "Trần Văn Tuấn", "Chào cả nhóm, hôm nay mỗi người cần gọi ít nhất 10 khách và cập nhật vào file doanh số trước 17h"),
+        (0, "08:40", "Nguyễn Thị Lan", "Em đã gửi báo giá cho khách Minh Phát rồi ạ, đang chờ phản hồi"),
+        (0, "09:30", "Nguyễn Thị Lan", "Khách Minh Phát yêu cầu giảm 5% và kéo dài thời hạn thanh toán, em đang bị vướng chỗ này"),
+        (0, "09:35", "Trần Văn Tuấn", "@Lan em đề xuất mức giảm 3% để anh xin duyệt sếp nhé"),
+        (0, "10:10", "Nguyễn Thị Lan", "Dạ em xin đề xuất giảm 3%, hợp đồng cần ký trước 20/11"),
+        (0, "11:20", "Trần Văn Tuấn", "Đơn An Khang 85 triệu đã chốt xong rồi mọi người 🎉"),
+        (0, "14:05", "Nguyễn Thị Lan", "Hợp đồng Minh Phát em soạn được 70% rồi ạ"),
+        (0, "15:30", "Trần Văn Tuấn", "Doanh số tuần đang đạt 80% chỉ tiêu, còn 2 đơn hàng đang chờ duyệt quá 3 ngày"),
+        (1, "09:00", "Trần Văn Tuấn", "Thứ 6 họp tổng kết tuần lúc 16h, mọi người chuẩn bị số liệu"),
+        (1, "10:45", "Nguyễn Thị Lan", "Em đang chuẩn bị hồ sơ năng lực gửi 3 khách hàng mới"),
+        (1, "16:20", "Nguyễn Thị Lan", "Đã gửi xong hồ sơ năng lực cho 3 khách"),
+    ],
+    (-100900000002, "Team Kỹ Thuật"): [
+        (0, "08:05", "Lê Minh Hùng", "Web bán hàng đang bị lỗi đăng nhập, khách phản ánh gấp"),
+        (0, "08:10", "Phạm Thu Phương", "@Hung em cần fix lỗi đăng nhập trước 12h hôm nay nhé, bên kinh doanh đang chờ"),
+        (0, "09:50", "Lê Minh Hùng", "Em đang xử lý, khoảng 60% rồi"),
+        (0, "11:40", "Lê Minh Hùng", "Đã fix xong lỗi đăng nhập, deploy bản 2.5 lên production rồi"),
+        (0, "13:15", "Phạm Thu Phương", "Em kiểm thử lại 45 ca, phát hiện 3 lỗi nhỏ ở trang thanh toán"),
+        (0, "14:30", "Lê Minh Hùng", "Server chậm vào giờ cao điểm, khách không thanh toán được – sự cố nghiêm trọng"),
+        (0, "14:35", "Lê Minh Hùng", "Em đề xuất nâng cấp RAM server lên 16GB, chi phí khoảng 2 triệu/tháng"),
+        (0, "16:00", "Phạm Thu Phương", "Tính năng xuất hóa đơn điện tử đang làm 70%, dự kiến xong thứ 6"),
+        (1, "10:00", "Lê Minh Hùng", "Em hoàn thành tính năng lọc đơn hàng, đã gửi team test"),
+        (1, "15:10", "Phạm Thu Phương", "Đang viết kịch bản kiểm thử bản 2.5"),
+    ],
+    (-100900000003, "Kế Toán – Hành Chính"): [
+        (0, "08:30", "Đỗ Ngọc Mai", "Hôm nay em đối soát công nợ tháng 11 và thanh toán 3 hóa đơn nhà cung cấp"),
+        (0, "10:15", "Đỗ Ngọc Mai", "Công ty Sao Việt vẫn chưa thanh toán 45 triệu, quá hạn 20 ngày rồi ạ"),
+        (0, "10:20", "Hoàng Thị Hà", "Chị Mai cần gửi thư nhắc nợ Sao Việt trước thứ 5 nhé"),
+        (0, "13:45", "Hoàng Thị Hà", "Em đã phỏng vấn 3 ứng viên kinh doanh, tuyển được 1/2 người"),
+        (0, "15:00", "Đỗ Ngọc Mai", "Đã thanh toán xong 3 hóa đơn nhà cung cấp"),
+        (1, "09:20", "Hoàng Thị Hà", "Nhắc mọi người nộp bảng chấm công trước cuối tuần"),
+    ],
+}
+
+
+def seed_tg_if_empty():
+    """Nạp tin nhắn nhóm Telegram demo (hôm qua + hôm nay) nếu chưa có tin nhắn nào."""
+    from datetime import datetime
+    from . import tgmsg
+    if tgmsg.count_messages() or db.get_setting("demo_tg_seeded"):
+        return
+    T = db.today()
+    mid = 1
+    for (cid, title), msgs in TG_DEMO.items():
+        tgmsg.upsert_chat(cid, title, "supergroup")
+        for back, hm, who, text in msgs:
+            day = T - timedelta(days=back)
+            hh, mm = map(int, hm.split(":"))
+            sent = datetime(day.year, day.month, day.day, hh, mm, tzinfo=db.now().tzinfo)
+            tgmsg.save_message(cid, mid, None, who, text, sent)
+            mid += 1
+    db.set_setting("demo_tg_seeded", "1")
+    log.info("Đã nạp tin nhắn nhóm Telegram demo")

@@ -26,6 +26,19 @@ def export(rep, formats):
     return out
 
 
+def _stat_lines(rep):
+    if rep.get("stat_lines"):
+        return list(rep["stat_lines"])
+    s = rep["stats"]
+    return [("Nhân viên", s["nhan_vien"]), ("Đã nộp báo cáo", s["da_nop"]), ("Chưa nộp", s["chua_nop"]),
+            ("Tiến độ trung bình (%)", s["tien_do_tb"]), ("Việc đang mở", s["viec_dang_mo"]),
+            ("Việc quá hạn", s["viec_qua_han"]), ("Vấn đề mức cao", s["van_de_cao"])]
+
+
+def _is_msg(rep):
+    return rep.get("kind") == "tin_nhan"
+
+
 def _table_rows(rep):
     return [[i, r["hang_muc"], r["noi_dung"], r["nguoi"], r["thoi_han"], r["trang_thai"]] for i, r in enumerate(rep["rows"], 1)]
 
@@ -60,12 +73,9 @@ def to_xlsx(rep, path):
     ws.title = "Tổng hợp"
     ws.append([rep["title"]])
     ws["A1"].font = Font(bold=True, size=14, color="1F4E78")
-    ws.append([f"Lập lúc: {rep['generated_at']}  –  Nguồn: báo cáo nhân viên trên hệ thống"])
+    ws.append([f"Lập lúc: {rep['generated_at']}  –  Nguồn: {rep.get('source', 'báo cáo nhân viên trên hệ thống')}"])
     ws.append([])
-    s = rep["stats"]
-    for k, v in [("Nhân viên", s["nhan_vien"]), ("Đã nộp báo cáo", s["da_nop"]), ("Chưa nộp", s["chua_nop"]),
-                 ("Tiến độ trung bình (%)", s["tien_do_tb"]), ("Việc đang mở", s["viec_dang_mo"]),
-                 ("Việc quá hạn", s["viec_qua_han"]), ("Vấn đề mức cao", s["van_de_cao"])]:
+    for k, v in _stat_lines(rep):
         ws.append([k, v])
         ws.cell(ws.max_row, 1).font = Font(bold=True)
     ws.append([])
@@ -78,6 +88,14 @@ def to_xlsx(rep, path):
     ws.column_dimensions["B"].width = 14
 
     _sheet(wb.create_sheet("Chi tiết"), HEAD, _table_rows(rep), [6, 12, 70, 26, 14, 26], color_col=1)
+    if _is_msg(rep):
+        _sheet(wb.create_sheet("Theo nhóm công việc"), ["Nhóm công việc", "Nội dung"],
+               [[g["ten"], x] for g in rep["analysis"]["theo_nhom"] for x in g.get("noi_dung", [])], [26, 100])
+        _sheet(wb.create_sheet("Tin nhắn gốc"), ["Thời gian", "Nhóm", "Người gửi", "Nội dung"],
+               [[m["sent_at"][:16].replace("T", " "), m.get("chat_title") or "", m["user_name"], m["text"]] for m in rep["messages"]],
+               [17, 22, 22, 100])
+        wb.save(path)
+        return
     _sheet(wb.create_sheet("Báo cáo nhân viên"),
            ["Ngày", "Nhân viên", "Phòng ban", "Đã làm", "Tiến độ %", "Kế hoạch", "Vấn đề", "Mức độ", "Đề xuất", "Tệp"],
            [[r["report_date"], r["full_name"], r["department"], r["done"], r["progress"], r["plan"], r["issues"],
@@ -106,16 +124,14 @@ def to_docx(rep, path):
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     p.runs[0].italic = True
 
-    s = rep["stats"]
     doc.add_heading("I. Số liệu chung", 2)
-    for line in [f"Nhân viên đã nộp báo cáo: {s['da_nop']}/{s['nhan_vien']}", f"Tiến độ trung bình: {s['tien_do_tb']}%",
-                 f"Công việc đang mở: {s['viec_dang_mo']} – quá hạn: {s['viec_qua_han']}", f"Vấn đề mức cao: {s['van_de_cao']}"]:
-        doc.add_paragraph(line, style="List Bullet")
+    for k, v in _stat_lines(rep):
+        doc.add_paragraph(f"{k}: {v}", style="List Bullet")
 
     doc.add_heading("II. Tóm tắt", 2)
     doc.add_paragraph(rep["tom_tat"])
     if rep.get("theo_phong_ban"):
-        doc.add_heading("III. Theo phòng ban", 2)
+        doc.add_heading("III. " + rep.get("group_label", "Theo phòng ban"), 2)
         for d in rep["theo_phong_ban"]:
             p = doc.add_paragraph(style="List Bullet")
             p.add_run(d["ten"] + ": ").bold = True
@@ -145,7 +161,7 @@ def to_docx(rep, path):
         for x in rep["rui_ro"]:
             doc.add_paragraph(x, style="List Bullet")
     if rep.get("goi_y"):
-        doc.add_heading("VI. Gợi ý", 2)
+        doc.add_heading("VI. " + ("Thông tin quan trọng" if _is_msg(rep) else "Gợi ý"), 2)
         for x in rep["goi_y"]:
             doc.add_paragraph(x, style="List Bullet")
     if rep["missing"]:
@@ -195,12 +211,12 @@ def to_pdf(rep, path):
     P = lambda txt, st=None: Paragraph(escape(str(txt)).replace("\n", "<br/>"), st or S())
     doc = SimpleDocTemplate(str(path), pagesize=landscape(A4), leftMargin=1.5 * cm, rightMargin=1.5 * cm,
                             topMargin=1.2 * cm, bottomMargin=1.2 * cm, title=rep["title"])
-    s = rep["stats"]
     el = [P(rep["title"], S(16, bold, alignment=1, textColor=colors.HexColor("#1F4E78"))),
           P(f"Lập lúc: {rep['generated_at']}", S(9, alignment=1, textColor=colors.grey)), Spacer(1, 10),
-          P(f"Đã nộp: {s['da_nop']}/{s['nhan_vien']}  ·  Tiến độ TB: {s['tien_do_tb']}%  ·  Việc đang mở: {s['viec_dang_mo']}"
-            f"  ·  Quá hạn: {s['viec_qua_han']}  ·  Vấn đề cao: {s['van_de_cao']}", S(10, bold)), Spacer(1, 8),
+          P("  ·  ".join(f"{k}: {v}" for k, v in _stat_lines(rep)), S(10, bold)), Spacer(1, 8),
           P("Tóm tắt", S(12, bold)), P(rep["tom_tat"]), Spacer(1, 8)]
+    if rep.get("theo_phong_ban"):
+        el.append(P(rep.get("group_label", "Theo phòng ban"), S(12, bold)))
     for d in rep.get("theo_phong_ban") or []:
         el.append(P(f"• {d['ten']}: {d['tom_tat']}"))
     if rep.get("rui_ro"):
@@ -224,6 +240,9 @@ def to_pdf(rep, path):
 
 # ---------------- TXT ----------------
 def to_txt(rep, path):
-    from .summary import to_message
+    if _is_msg(rep):
+        from .tgmsg import to_message
+    else:
+        from .summary import to_message
     lines = [to_message(rep), "", "CHI TIẾT:"] + [f"{r[0]}. [{r[1]}] {r[2]} | {r[3]} | {r[4]} | {r[5]}" for r in _table_rows(rep)]
     Path(path).write_text("\n".join(lines), encoding="utf-8")

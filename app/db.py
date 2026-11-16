@@ -87,6 +87,18 @@ def init():
             report_id INTEGER REFERENCES reports(id) ON DELETE CASCADE,
             filename TEXT, stored_path TEXT, size INTEGER, content TEXT, created_at TEXT);
 
+        CREATE TABLE IF NOT EXISTS tg_chats(
+            chat_id INTEGER PRIMARY KEY, title TEXT, type TEXT, active INTEGER DEFAULT 1,
+            added_at TEXT, updated_at TEXT);
+
+        CREATE TABLE IF NOT EXISTS tg_messages(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            chat_id INTEGER NOT NULL, message_id INTEGER NOT NULL,
+            user_id INTEGER, user_name TEXT, kind TEXT DEFAULT 'text',
+            text TEXT, file_name TEXT, sent_at TEXT,
+            UNIQUE(chat_id, message_id));
+        CREATE INDEX IF NOT EXISTS ix_tgmsg_time ON tg_messages(sent_at);
+
         CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY, value TEXT);
 
         CREATE TABLE IF NOT EXISTS audit(

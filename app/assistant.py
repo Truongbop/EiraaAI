@@ -2,7 +2,7 @@
 import re
 from dataclasses import dataclass, field
 
-from . import ai, db, exporter, summary
+from . import ai, db, exporter, summary, tgmsg
 
 ALL_FORMATS = ["xlsx", "docx", "pdf"]
 
@@ -81,6 +81,18 @@ def tool_attachments(ten=None, ky="hôm nay", _files=None):
         for r, a in found[:30])
 
 
+def is_message_question(t):
+    return bool(re.search(r"tin nhắn|tin nhan|\bnt\b|\btn\b|nhóm chat|nhóm tele|\btele\b|telegram|trao đổi|\bchat\b|\bgroup\b|\bnhóm\b", t))
+
+
+def tool_messages(ky="hôm nay", nhom=None, xuat_file=None, _files=None):
+    chat_ids = tgmsg.find_chats(nhom) if nhom else None
+    rep = tgmsg.build(ky + (" " + nhom if nhom else ""), chat_ids)
+    if xuat_file and _files is not None:
+        _files += exporter.export(rep, xuat_file)
+    return tgmsg.to_message(rep)
+
+
 def tool_overview():
     d = db.dashboard(db.today())
     deps = db.departments()
@@ -115,12 +127,22 @@ TOOLS = [
         "parameters": {"type": "object", "properties": {"ten": {"type": "string", "description": "Tên nhân viên, bỏ trống = tất cả"},
                                                          "ky": {"type": "string"}}}}},
     {"type": "function", "function": {
+        "name": "tong_hop_tin_nhan",
+        "description": "Tổng hợp / tóm tắt TIN NHẮN TRAO ĐỔI trong các nhóm Telegram: phân loại theo nhóm công việc, "
+                       "đầu việc, tiến độ, vấn đề cần xử lý, đề xuất. Dùng khi sếp hỏi về tin nhắn, nhóm, trao đổi, chat.",
+        "parameters": {"type": "object", "properties": {
+            "ky": {"type": "string", "description": "hôm nay | hôm qua | tuần này | tháng này | dd/mm/yyyy | N ngày"},
+            "nhom": {"type": "string", "description": "Tên nhóm Telegram nếu sếp chỉ định"},
+            "xuat_file": {"type": "array", "items": {"type": "string", "enum": ["xlsx", "docx", "pdf", "txt"]}}},
+            "required": ["ky"]}}},
+    {"type": "function", "function": {
         "name": "tong_quan_hom_nay", "description": "Số liệu nhanh hôm nay và danh sách phòng ban.",
         "parameters": {"type": "object", "properties": {}}}},
 ]
 
 SYSTEM = """Bạn là EIRAA AI – trợ lý riêng của giám đốc {company} trên Telegram. Hôm nay là {today}.
-Nhân viên nộp báo cáo trên hệ thống quản lý; bạn tra dữ liệu bằng công cụ rồi trả lời sếp.
+Nhân viên nộp báo cáo trên hệ thống quản lý và trao đổi trong các nhóm Telegram (bot ghi nhận tin nhắn nhóm);
+bạn tra dữ liệu bằng công cụ rồi trả lời sếp. Câu hỏi về tin nhắn / nhóm / trao đổi → dùng tong_hop_tin_nhan.
 - Luôn dùng công cụ để lấy số liệu, KHÔNG tự bịa. Thiếu dữ liệu thì nói rõ "Chưa xác định".
 - Xưng "em", gọi "sếp". Trả lời tiếng Việt, gọn, rõ, dùng gạch đầu dòng; không dùng Markdown (**, #).
 - Khi sếp nói "tổng hợp báo cáo", "báo cáo hôm nay/tuần/tháng" → gọi tong_hop_bao_cao. Nếu sếp nhắc file/excel/word/pdf/xuất
@@ -143,6 +165,8 @@ def answer(question: str, history: list | None = None) -> Reply:
             return tool_staff(args.get("ten", ""), args.get("ky") or "7 ngày")
         if name == "gui_tep_bao_cao":
             return tool_attachments(args.get("ten"), args.get("ky") or "hôm nay", files)
+        if name == "tong_hop_tin_nhan":
+            return tool_messages(args.get("ky") or "hôm nay", args.get("nhom"), args.get("xuat_file"), files)
         if name == "tong_quan_hom_nay":
             return tool_overview()
         return "Không có công cụ này."
@@ -176,6 +200,12 @@ def answer_basic(question: str) -> Reply:
         m = re.search(r"của\s+([A-Za-zÀ-ỹ ]{2,30}?)(?:\s+(?:hôm|tuần|tháng|ngày)|$)", question)
         text = tool_attachments(m[1].strip() if m else None, t, files)
         return Reply(text, files)
+    if is_message_question(t) and not re.search(r"file (gốc|đính kèm)", t):
+        nhom = None
+        if m := re.search(r"nhóm\s+([A-Za-zÀ-ỹ0-9 ]{2,40}?)(?:\s+(?:hôm|tuần|tháng|ngày|gửi|xuất)|$)", t):
+            nhom = m[1].strip()
+        text = tool_messages(t, nhom, wants_files(t), files)
+        return Reply(text, files)
     if "chưa nộp" in t or "chưa báo cáo" in t or "ai chưa" in t:
         return Reply(tool_missing(t, dep))
     if "quá hạn" in t or "trễ hạn" in t:
@@ -193,4 +223,5 @@ def answer_basic(question: str) -> Reply:
                  "• tổng hợp báo cáo hôm nay / tuần này / tháng này\n• gửi file excel báo cáo tuần\n"
                  "• ai chưa nộp báo cáo\n• việc nào quá hạn\n• báo cáo của <tên nhân viên>\n"
                  "• gửi file đính kèm của <tên> hôm nay\n"
+                 "• tổng hợp tin nhắn hôm nay / tóm tắt nhóm kinh doanh tuần này\n"
                  "(Bật OPENAI_API_KEY để em hiểu mọi câu hỏi tự nhiên.)")

@@ -40,7 +40,7 @@ async def start_bot():
         app = tgbot.build(token)
         await app.initialize()
         await app.start()
-        await app.updater.start_polling(allowed_updates=["message", "callback_query"], drop_pending_updates=True)
+        await app.updater.start_polling(allowed_updates=["message", "callback_query", "my_chat_member"], drop_pending_updates=True)
         BOT.update(app=app, username=app.bot.username, error=None)
         log.info("Bot Telegram @%s đang chạy", app.bot.username)
     except Exception as e:
@@ -77,6 +77,7 @@ async def lifespan(_):
     if os.getenv("DEMO_DATA", "1") != "0":
         from app import demo
         await asyncio.to_thread(demo.seed_if_empty)       # lần đầu chạy, chưa có nhân viên → nạp dữ liệu demo
+        await asyncio.to_thread(demo.seed_tg_if_empty)    # chưa có tin nhắn nhóm → nạp tin nhắn demo
     await start_bot()
     url = f"http://localhost:{PORT}"
     log.info("Web đang chạy: %s  (giữ cửa sổ này mở, bấm Ctrl+C để tắt)", url)
