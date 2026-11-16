@@ -104,6 +104,9 @@ def init():
         CREATE TABLE IF NOT EXISTS audit(
             id INTEGER PRIMARY KEY AUTOINCREMENT, actor TEXT, action TEXT, detail TEXT, created_at TEXT);
         """)
+        mcols = [r[1] for r in c.execute("PRAGMA table_info(tg_messages)")]
+        if "source" not in mcols:      # group | private | forward
+            c.execute("ALTER TABLE tg_messages ADD COLUMN source TEXT DEFAULT 'group'")
         cols = [r[1] for r in c.execute("PRAGMA table_info(attachments)")]
         if "subject" not in cols:
             c.execute("ALTER TABLE attachments ADD COLUMN subject TEXT DEFAULT ''")

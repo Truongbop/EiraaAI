@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from app import db, files, settings
+from app import db, files, settings, tgmsg
 from app import telegram_bot as tgbot
 from app.config import BASE_DIR, COMPANY_NAME, HOST, LOG_DIR, PORT
 
@@ -277,6 +277,59 @@ def edit_task(tid: int, body: TaskEditIn):
 def del_task(tid: int):
     db.delete_task(tid)
     db.log("web", "xóa công việc", tid)
+    return {"ok": True}
+
+
+# ================= Khung chat trên web (đồng nghiệp + khách hàng) =================
+class ChatIn(BaseModel):
+    chat_id: int
+    user_id: int
+    text: str = Field(min_length=1, max_length=4000)
+
+
+class CustomerIn(BaseModel):
+    name: str = Field(min_length=2, max_length=80)
+    company: str = Field(default="", max_length=120)
+    phone: str = Field(default="", max_length=20)
+    text: str = Field(min_length=1, max_length=4000)
+    user_id: int | None = None          # nhân viên ghi nhận thay khách (gọi điện, Zalo...)
+
+
+@api.get("/api/chat/threads")
+def chat_threads():
+    return tgmsg.list_threads()
+
+
+@api.get("/api/chat/messages")
+def chat_messages(chat_id: int):
+    return tgmsg.thread_messages(chat_id)
+
+
+@api.post("/api/chat/send")
+def chat_send(body: ChatIn):
+    u = _user(body.user_id)
+    try:
+        tgmsg.post_web(body.chat_id, u["full_name"], body.text, u["id"])
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    return {"ok": True}
+
+
+@api.post("/api/chat/customer")
+def chat_new_customer(body: CustomerIn):
+    """Nhân viên tạo hội thoại khách hàng mới (ghi lại tin khách gửi qua điện thoại / Zalo...)."""
+    cid = tgmsg.customer_thread(body.name, body.company, body.phone)
+    tgmsg.post_web(cid, body.name.strip(), body.text, None)
+    if body.user_id:
+        db.log(_user(body.user_id)["full_name"], "ghi nhận tin khách hàng", body.name)
+    return {"ok": True, "chat_id": cid}
+
+
+@api.post("/api/public/contact")
+def public_contact(body: CustomerIn):
+    """Trang liên hệ cho khách hàng (/lienhe.html) – khách tự gửi tin nhắn."""
+    cid = tgmsg.customer_thread(body.name, body.company, body.phone)
+    tgmsg.post_web(cid, body.name.strip(), body.text, None)
     return {"ok": True}
 
 

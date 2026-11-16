@@ -22,13 +22,14 @@ HELP = """🤖 EIRAA AI – trợ lý tổng hợp của sếp
 
 📌 Sếp gõ: tổng hợp tin nhắn
 Bot gửi về 1 bản tổng hợp gồm:
-1️⃣ Nội dung tin nhắn các nhóm Telegram (phân loại theo nhóm công việc, vấn đề cần xử lý)
-2️⃣ Tiến độ công việc (xong / đang làm / quá hạn, % tiến độ)
-3️⃣ Nội dung các bài báo cáo nhân viên đã nộp (và ai chưa nộp)
+1️⃣ Tin nhắn khách hàng trên web (khách cần gì, ai đang chờ phản hồi)
+2️⃣ Tin nhắn đồng nghiệp (phân loại theo công việc, vấn đề cần xử lý)
+3️⃣ Tiến độ công việc (xong / đang làm / quá hạn, % tiến độ)
+4️⃣ Nội dung các bài báo cáo nhân viên đã nộp (và ai chưa nộp)
 
 Có thể thêm thời gian hoặc nhóm:
 • tổng hợp tin nhắn hôm nay / hôm qua / tuần này / tháng này
-• tổng hợp tin nhắn nhóm kinh doanh tuần này
+• tổng hợp tin nhắn phòng kinh doanh tuần này
 • tổng hợp tin nhắn tuần này gửi file excel
 
 Dưới bản tổng hợp có nút 📗 Excel · 📘 Word · 📕 PDF để tải file.

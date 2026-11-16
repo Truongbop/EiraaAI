@@ -12,6 +12,7 @@
     <div class="brand"><div class="logo">E</div><div><b id="companyName">EIRAA</b><small>Báo cáo công việc</small></div></div>
     <nav id="nav">
       <a data-v="report">📝 Nộp báo cáo</a>
+      <a data-v="chat">💬 Tin nhắn <span class="nav-badge hidden" id="chatBadge"></span></a>
       <a data-v="overview">📊 Tổng quan</a>
       <a data-v="tasks">📌 Công việc</a>
       <a data-v="history">🗂️ Lịch sử báo cáo</a>
@@ -52,6 +53,29 @@
           <select id="subDays"><option value="1">Hôm nay</option><option value="7" selected>7 ngày</option><option value="30">30 ngày</option></select>
         </div>
         <div id="subList"></div>
+      </div>
+    </section>
+
+    <!-- TIN NHẮN -->
+    <section class="view hidden" id="v-chat">
+      <div class="chat-wrap card">
+        <aside class="threads">
+          <div class="threads-head">
+            <b>Cuộc trò chuyện</b>
+            <button class="btn sm" id="newCustomerBtn" title="Ghi nhận tin nhắn của khách hàng mới">+ Khách hàng</button>
+          </div>
+          <div id="threadList"></div>
+          <p class="muted small">Khách hàng tự gửi tin tại trang <a href="lienhe.html" target="_blank" rel="noopener">/lienhe.html</a></p>
+        </aside>
+        <div class="conv">
+          <div class="conv-head"><button class="icon-btn back" id="convBack">←</button><div><b id="convTitle">Chọn cuộc trò chuyện</b><div class="muted small" id="convSub"></div></div></div>
+          <div class="msgs" id="msgList"></div>
+          <form class="composer" id="chatForm">
+            <select id="chatAs" title="Gửi với tên" required></select>
+            <textarea id="chatText" rows="1" placeholder="Nhập tin nhắn…" title="Enter để gửi, Shift+Enter xuống dòng" required></textarea>
+            <button class="btn primary">Gửi</button>
+          </form>
+        </div>
       </div>
     </section>
 

@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Liên hệ</title><link rel="stylesheet" href="style.css">
+<style>.wrap{max-width:520px;margin:40px auto;padding:0 16px}.ok{text-align:center;padding:30px}</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <div class="row gap8 mb"><div class="logo">E</div><div><b id="company">Liên hệ</b><div class="muted">Gửi tin nhắn cho chúng tôi, nhân viên sẽ phản hồi sớm nhất</div></div></div>
+    <form id="f">
+      <label><span>Họ tên *</span><input name="name" required minlength="2"></label>
+      <div class="grid-2"><label><span>Công ty</span><input name="company"></label>
+      <label><span>Số điện thoại *</span><input name="phone" required pattern="[0-9 +.]{8,15}"></label></div>
+      <label><span>Nội dung *</span><textarea name="text" rows="5" required placeholder="Bạn cần hỗ trợ gì?"></textarea></label>
+      <div class="row end"><button class="btn primary" id="b">Gửi tin nhắn</button></div>
+    </form>
+    <div id="done" class="ok hidden"><h3>✅ Đã gửi tin nhắn</h3><p class="muted">Cảm ơn bạn! Nhân viên sẽ liên hệ lại sớm.</p>
+      <button class="btn" onclick="location.reload()">Gửi thêm tin</button></div>
+  </div>
+</div>
+<script>
+fetch("/api/info").then(r => r.json()).then(i => { document.getElementById("company").textContent = i.company; document.title = "Liên hệ – " + i.company; });
+document.getElementById("f").onsubmit = async (e) => {
+  e.preventDefault();
+  const b = document.getElementById("b"); b.disabled = true;
+  const res = await fetch("/api/public/contact", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(Object.fromEntries(new FormData(e.target))) });
+  b.disabled = false;
+  if (res.ok) { e.target.classList.add("hidden"); document.getElementById("done").classList.remove("hidden"); }
+  else alert("Gửi chưa được, vui lòng thử lại");
+};
+</script>
+</body>
+</html>

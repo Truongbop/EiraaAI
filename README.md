@@ -45,6 +45,7 @@ Khi dùng thật: tắt `main.py`, thêm dòng `DEMO_DATA=0` vào `.env`, xóa t
   Xem IP bằng lệnh `ipconfig` (dòng IPv4). Lần đầu chạy, nếu Windows hỏi tường lửa thì bấm **Allow**.
 
 ## Web có gì
+- **Tin nhắn**: khung chat trên web – *Chat nội bộ* giữa đồng nghiệp và hội thoại với *khách hàng*. Khách tự gửi tin ở trang `/lienhe.html`, nhân viên trả lời trên web; nút **+ Khách hàng** để ghi lại tin khách gửi qua điện thoại/Zalo.
 - **Nộp báo cáo**: chọn tên, gõ chủ đề, kéo thả file Excel hoặc Word → bấm Nộp. Bên dưới hiện danh sách báo cáo đã nộp kèm chủ đề.
 - **Tổng quan**: ai đã nộp / chưa nộp, vấn đề trong ngày, toàn bộ báo cáo.
 - **Công việc**: giao việc, đổi trạng thái và tiến độ ngay trong bảng.
@@ -66,7 +67,7 @@ Khi dùng thật: tắt `main.py`, thêm dòng `DEMO_DATA=0` vào `.env`, xóa t
 
 | Sếp gõ | Bot trả về |
 |---|---|
-| **tổng hợp tin nhắn** (hôm nay / tuần này / nhóm kinh doanh…) | 1 bản tổng hợp gồm: **1. Nội dung tin nhắn** các nhóm Telegram · **2. Tiến độ công việc** · **3. Nội dung các bài báo cáo** nhân viên đã nộp |
+| **tổng hợp tin nhắn** (hôm nay / tuần này / tháng này…) | 1 bản tổng hợp gồm: **1. Tin nhắn khách hàng** (ai chờ phản hồi) · **2. Tin nhắn đồng nghiệp** · **3. Tiến độ công việc** · **4. Nội dung các bài báo cáo** |
 
 Dưới bản tổng hợp có nút **📗 Excel · 📘 Word · 📕 PDF**. File Excel có các sheet: Tổng hợp, Chi tiết, Tiến độ công việc,
 Nội dung báo cáo, Theo nhóm công việc, Tin nhắn gốc.

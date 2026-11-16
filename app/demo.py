@@ -177,59 +177,84 @@ def seed_if_empty():
         db.set_setting("demo_seeded", "1")
 
 
-# ======================= Tin nhắn nhóm Telegram demo =======================
-TG_DEMO = {
-    (-100900000001, "Phòng Kinh Doanh"): [
-        (0, "08:15", "Trần Văn Tuấn", "Chào cả nhóm, hôm nay mỗi người cần gọi ít nhất 10 khách và cập nhật vào file doanh số trước 17h"),
-        (0, "08:40", "Nguyễn Thị Lan", "Em đã gửi báo giá cho khách Minh Phát rồi ạ, đang chờ phản hồi"),
-        (0, "09:30", "Nguyễn Thị Lan", "Khách Minh Phát yêu cầu giảm 5% và kéo dài thời hạn thanh toán, em đang bị vướng chỗ này"),
-        (0, "09:35", "Trần Văn Tuấn", "@Lan em đề xuất mức giảm 3% để anh xin duyệt sếp nhé"),
-        (0, "10:10", "Nguyễn Thị Lan", "Dạ em xin đề xuất giảm 3%, hợp đồng cần ký trước 20/11"),
-        (0, "11:20", "Trần Văn Tuấn", "Đơn An Khang 85 triệu đã chốt xong rồi mọi người 🎉"),
-        (0, "14:05", "Nguyễn Thị Lan", "Hợp đồng Minh Phát em soạn được 70% rồi ạ"),
-        (0, "15:30", "Trần Văn Tuấn", "Doanh số tuần đang đạt 80% chỉ tiêu, còn 2 đơn hàng đang chờ duyệt quá 3 ngày"),
-        (1, "09:00", "Trần Văn Tuấn", "Thứ 6 họp tổng kết tuần lúc 16h, mọi người chuẩn bị số liệu"),
-        (1, "10:45", "Nguyễn Thị Lan", "Em đang chuẩn bị hồ sơ năng lực gửi 3 khách hàng mới"),
-        (1, "16:20", "Nguyễn Thị Lan", "Đã gửi xong hồ sơ năng lực cho 3 khách"),
-    ],
-    (-100900000002, "Team Kỹ Thuật"): [
-        (0, "08:05", "Lê Minh Hùng", "Web bán hàng đang bị lỗi đăng nhập, khách phản ánh gấp"),
-        (0, "08:10", "Phạm Thu Phương", "@Hung em cần fix lỗi đăng nhập trước 12h hôm nay nhé, bên kinh doanh đang chờ"),
-        (0, "09:50", "Lê Minh Hùng", "Em đang xử lý, khoảng 60% rồi"),
-        (0, "11:40", "Lê Minh Hùng", "Đã fix xong lỗi đăng nhập, deploy bản 2.5 lên production rồi"),
-        (0, "13:15", "Phạm Thu Phương", "Em kiểm thử lại 45 ca, phát hiện 3 lỗi nhỏ ở trang thanh toán"),
-        (0, "14:30", "Lê Minh Hùng", "Server chậm vào giờ cao điểm, khách không thanh toán được – sự cố nghiêm trọng"),
-        (0, "14:35", "Lê Minh Hùng", "Em đề xuất nâng cấp RAM server lên 16GB, chi phí khoảng 2 triệu/tháng"),
-        (0, "16:00", "Phạm Thu Phương", "Tính năng xuất hóa đơn điện tử đang làm 70%, dự kiến xong thứ 6"),
-        (1, "10:00", "Lê Minh Hùng", "Em hoàn thành tính năng lọc đơn hàng, đã gửi team test"),
-        (1, "15:10", "Phạm Thu Phương", "Đang viết kịch bản kiểm thử bản 2.5"),
-    ],
-    (-100900000003, "Kế Toán – Hành Chính"): [
-        (0, "08:30", "Đỗ Ngọc Mai", "Hôm nay em đối soát công nợ tháng 11 và thanh toán 3 hóa đơn nhà cung cấp"),
-        (0, "10:15", "Đỗ Ngọc Mai", "Công ty Sao Việt vẫn chưa thanh toán 45 triệu, quá hạn 20 ngày rồi ạ"),
-        (0, "10:20", "Hoàng Thị Hà", "Chị Mai cần gửi thư nhắc nợ Sao Việt trước thứ 5 nhé"),
-        (0, "13:45", "Hoàng Thị Hà", "Em đã phỏng vấn 3 ứng viên kinh doanh, tuyển được 1/2 người"),
-        (0, "15:00", "Đỗ Ngọc Mai", "Đã thanh toán xong 3 hóa đơn nhà cung cấp"),
-        (1, "09:20", "Hoàng Thị Hà", "Nhắc mọi người nộp bảng chấm công trước cuối tuần"),
-    ],
-}
+# ======================= Tin nhắn mẫu trên web (đồng nghiệp + khách hàng) =======================
+# (ngày lùi, giờ, người gửi, nội dung)  – người gửi là tên nhân viên, hoặc None = khách hàng
+INTERNAL_DEMO = [
+    (1, "09:00", "Trần Văn Tuấn", "Thứ 6 họp tổng kết tuần lúc 16h, mọi người chuẩn bị số liệu"),
+    (1, "10:45", "Nguyễn Thị Lan", "Em đang chuẩn bị hồ sơ năng lực gửi 3 khách hàng mới"),
+    (1, "16:20", "Nguyễn Thị Lan", "Đã gửi xong hồ sơ năng lực cho 3 khách"),
+    (0, "08:05", "Lê Minh Hùng", "Web bán hàng đang bị lỗi đăng nhập, khách phản ánh gấp"),
+    (0, "08:10", "Phạm Thu Phương", "@Hung em cần fix lỗi đăng nhập trước 12h hôm nay nhé, bên kinh doanh đang chờ"),
+    (0, "08:15", "Trần Văn Tuấn", "Hôm nay mỗi người cần gọi ít nhất 10 khách và cập nhật vào file doanh số trước 17h"),
+    (0, "08:30", "Đỗ Ngọc Mai", "Hôm nay em đối soát công nợ tháng 11 và thanh toán 3 hóa đơn nhà cung cấp"),
+    (0, "09:35", "Trần Văn Tuấn", "@Lan khách Minh Phát em đề xuất mức giảm 3% để anh xin duyệt sếp nhé"),
+    (0, "09:50", "Lê Minh Hùng", "Em đang xử lý lỗi đăng nhập, khoảng 60% rồi"),
+    (0, "10:15", "Đỗ Ngọc Mai", "Công ty Sao Việt vẫn chưa thanh toán 45 triệu, quá hạn 20 ngày rồi ạ"),
+    (0, "10:20", "Hoàng Thị Hà", "Chị Mai cần gửi thư nhắc nợ Sao Việt trước thứ 5 nhé"),
+    (0, "11:20", "Trần Văn Tuấn", "Đơn An Khang 85 triệu đã chốt xong rồi mọi người 🎉"),
+    (0, "11:40", "Lê Minh Hùng", "Đã fix xong lỗi đăng nhập, deploy bản 2.5 lên production rồi"),
+    (0, "13:45", "Hoàng Thị Hà", "Em đã phỏng vấn 3 ứng viên kinh doanh, tuyển được 1/2 người"),
+    (0, "14:30", "Lê Minh Hùng", "Server chậm vào giờ cao điểm, khách không thanh toán được – sự cố nghiêm trọng"),
+    (0, "14:35", "Lê Minh Hùng", "Em đề xuất nâng cấp RAM server lên 16GB, chi phí khoảng 2 triệu/tháng"),
+    (0, "16:00", "Phạm Thu Phương", "Tính năng xuất hóa đơn điện tử đang làm 70%, dự kiến xong thứ 6"),
+]
+CUSTOMER_DEMO = [
+    (("Anh Minh", "Công ty Minh Phát", "0901234567"), [
+        (1, "15:10", None, "Chào em, bên anh đã nhận báo giá gói bảo trì. Giá hơi cao, bên em giảm được 5% không?"),
+        (1, "15:30", "Nguyễn Thị Lan", "Dạ em chào anh, em sẽ xin ý kiến quản lý về mức giảm và báo lại anh trong hôm nay ạ"),
+        (0, "09:20", None, "Ngoài giảm giá anh muốn thanh toán làm 2 đợt, được không em?"),
+        (0, "10:05", "Nguyễn Thị Lan", "Dạ bên em đang đề xuất giảm 3% và thanh toán 2 đợt, em gửi lại hợp đồng chiều nay ạ"),
+        (0, "15:40", None, "Ok em. Khi nào bên anh nhận được hợp đồng? Anh cần ký trước 20/11"),
+    ]),
+    (("Chị Hoa", "Công ty An Khang", "0912345678"), [
+        (0, "08:50", None, "Em ơi chị xác nhận đặt 2 gói phần mềm bán hàng nhé, tổng 85 triệu"),
+        (0, "09:05", "Trần Văn Tuấn", "Dạ em cảm ơn chị, em gửi hợp đồng và lịch triển khai cho chị ngay ạ"),
+        (0, "11:15", None, "Chị đã ký hợp đồng rồi. Khi nào bên em cài đặt được?"),
+        (0, "11:25", "Trần Văn Tuấn", "Dạ thứ 4 tuần này kỹ thuật bên em qua cài đặt và đào tạo luôn ạ"),
+    ]),
+    (("Anh Tùng", "Công ty Sao Việt", "0987654321"), [
+        (0, "10:30", "Đỗ Ngọc Mai", "Dạ em chào anh, hóa đơn 45 triệu tháng 10 đã quá hạn 20 ngày, anh kiểm tra giúp em ạ"),
+        (0, "13:10", None, "Bên anh đang chậm dòng tiền, thứ 6 này anh thanh toán được không em?"),
+        (0, "13:20", "Đỗ Ngọc Mai", "Dạ được anh, em ghi nhận thanh toán thứ 6. Em gửi lại thông tin chuyển khoản ạ"),
+    ]),
+    (("Chị Ngọc", "Khách lẻ", "0938111222"), [
+        (0, "14:40", None, "Shop ơi tôi không thanh toán được trên web, bấm thanh toán bị lỗi, xử lý gấp giúp tôi"),
+        (0, "15:05", None, "Đơn hàng của tôi cần giao trước thứ 6, bao giờ xử lý xong?"),
+    ]),
+]
 
 
 def seed_tg_if_empty():
-    """Nạp tin nhắn nhóm Telegram demo (hôm qua + hôm nay) nếu chưa có tin nhắn nào."""
+    """Nạp tin nhắn mẫu trên web (chat nội bộ + khách hàng) nếu chưa có tin nhắn web nào."""
     from datetime import datetime
     from . import tgmsg
-    if tgmsg.count_messages() or db.get_setting("demo_tg_seeded"):
+    tgmsg.ensure_internal()
+    if db.get_setting("demo_webchat_seeded") or tgmsg.list_threads()[0]["total"] or len(tgmsg.list_threads()) > 1:
         return
-    T = db.today()
-    mid = 1
-    for (cid, title), msgs in TG_DEMO.items():
-        tgmsg.upsert_chat(cid, title, "supergroup")
+    staff = {u["full_name"]: u["id"] for u in db.list_users()}
+    T, tz = db.today(), db.now().tzinfo
+
+    now = db.now()
+    day_start = datetime(T.year, T.month, T.day, 7, 30, tzinfo=tz)
+    latest = datetime(T.year, T.month, T.day, 16, 0, tzinfo=tz)
+    limit = now - timedelta(minutes=5)
+
+    def at(back, hm):
+        d = T - timedelta(days=back)
+        hh, mm = map(int, hm.split(":"))
+        t = datetime(d.year, d.month, d.day, hh, mm, tzinfo=tz)
+        if back == 0 and limit < latest:          # tin mẫu hôm nay không được muộn hơn giờ hiện tại
+            if limit > day_start:                  # dồn khung 7:30–16:00 vào 7:30–bây giờ
+                t = day_start + (t - day_start) * ((limit - day_start) / (latest - day_start))
+            else:                                  # còn quá sớm: dồn vào 2 tiếng trước
+                t = limit - (latest - t) / 4.25
+        return t
+
+    for back, hm, who, text in INTERNAL_DEMO:
+        tgmsg.post_web(tgmsg.INTERNAL_ID, who, text, staff.get(who), at(back, hm))
+    for (name, company, phone), msgs in CUSTOMER_DEMO:
+        cid = tgmsg.customer_thread(name, company, phone)
         for back, hm, who, text in msgs:
-            day = T - timedelta(days=back)
-            hh, mm = map(int, hm.split(":"))
-            sent = datetime(day.year, day.month, day.day, hh, mm, tzinfo=db.now().tzinfo)
-            tgmsg.save_message(cid, mid, None, who, text, sent)
-            mid += 1
-    db.set_setting("demo_tg_seeded", "1")
-    log.info("Đã nạp tin nhắn nhóm Telegram demo")
+            tgmsg.post_web(cid, who or name, text, staff.get(who) if who else None, at(back, hm))
+    db.set_setting("demo_webchat_seeded", "1")
+    log.info("Đã nạp tin nhắn mẫu trên web (đồng nghiệp + khách hàng)")

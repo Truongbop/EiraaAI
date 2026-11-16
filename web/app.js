@@ -6,7 +6,7 @@ const ls = { get: (k) => { try { return localStorage.getItem(k); } catch { retur
 const S = { info: null, users: [], view: null };
 const STATUSES = ["Chưa làm", "Đang làm", "Hoàn thành", "Tạm dừng"];
 const VIEWS = {
-  report: ["Nộp báo cáo", loadReport], overview: ["Tổng quan", loadOverview], tasks: ["Công việc", loadTasks],
+  report: ["Nộp báo cáo", loadReport], chat: ["Tin nhắn", loadChat], overview: ["Tổng quan", loadOverview], tasks: ["Công việc", loadTasks],
   history: ["Lịch sử báo cáo", loadHistory], users: ["Nhân viên", loadUsers], audit: ["Nhật ký", loadAudit],
 };
 
@@ -71,6 +71,7 @@ if (ls.get("theme")) document.documentElement.dataset.theme = ls.get("theme");
 async function refreshUsers() {
   S.users = await api("/api/users");
   $("#reporter").innerHTML = userOptions(ls.get("reporter"), "— Chọn tên của bạn —");
+  $("#chatAs").innerHTML = userOptions(ls.get("reporter"), "— Gửi với tên —");
   $$(".userSelect").forEach((s) => (s.innerHTML = userOptions(s.value)));
   for (const id of ["#taskPerson", "#histPerson"]) { const v = $(id).value; $(id).innerHTML = userOptions(v, "Tất cả nhân viên"); }
 }
@@ -134,6 +135,80 @@ async function loadReport() {
     await api("/api/attachments/" + b.dataset.delsub, { method: "DELETE" }); toast("Đã xóa"); loadReport();
   }));
 }
+
+// ================= TIN NHẮN (đồng nghiệp + khách hàng) =================
+const CH = { id: Number(ls.get("chatId")) || -1, threads: [], timer: null };
+const hm = (iso) => iso ? `${iso.slice(11, 16)} ${iso.slice(8, 10)}/${iso.slice(5, 7)}` : "";
+async function loadThreads() {
+  CH.threads = await api("/api/chat/threads");
+  const waiting = CH.threads.filter((t) => t.type === "web_customer" && t.waiting).length;
+  $("#chatBadge").textContent = waiting; $("#chatBadge").classList.toggle("hidden", !waiting);
+  const item = (t) => `<button class="thread ${t.chat_id === CH.id ? "active" : ""}" data-tid="${t.chat_id}">
+      <span class="t-ico">${t.type === "web_internal" ? "👥" : "🧑‍💼"}</span>
+      <span class="grow"><b>${esc(t.title)}</b><small class="muted">${esc((t.last_text || "Chưa có tin nhắn").slice(0, 60))}</small></span>
+      <span class="t-meta"><small class="muted">${hm(t.last_at)}</small>${t.type === "web_customer" && t.waiting ? '<span class="badge b-warn">⏳ chờ</span>' : ""}</span></button>`;
+  const internal = CH.threads.filter((t) => t.type === "web_internal");
+  const cus = CH.threads.filter((t) => t.type === "web_customer");
+  $("#threadList").innerHTML = `<div class="t-group">Đồng nghiệp</div>${internal.map(item).join("")}
+    <div class="t-group">Khách hàng (${cus.length})</div>${cus.map(item).join("") || '<p class="muted small">Chưa có khách hàng nhắn tin.</p>'}`;
+  $$("[data-tid]").forEach((b) => (b.onclick = () => openThread(Number(b.dataset.tid))));
+}
+async function openThread(id, show = true) {
+  CH.id = id; ls.set("chatId", id);
+  if (show) $(".chat-wrap").classList.add("open");
+  $$("[data-tid]").forEach((b) => b.classList.toggle("active", Number(b.dataset.tid) === id));
+  const t = CH.threads.find((x) => x.chat_id === id);
+  $("#convTitle").textContent = t ? t.title : "";
+  $("#convSub").textContent = t?.type === "web_customer" ? "Khách hàng · nhân viên trả lời bên dưới" : "Chat nội bộ giữa đồng nghiệp";
+  const msgs = await api("/api/chat/messages?chat_id=" + id);
+  const box = $("#msgList");
+  let lastDay = "";
+  box.innerHTML = msgs.length ? msgs.map((m) => {
+    const day = m.sent_at.slice(0, 10), mine = m.user_id !== null && t?.type === "web_customer";
+    const sep = day !== lastDay ? `<div class="day-sep">${fmtDate(day)}</div>` : ""; lastDay = day;
+    const cls = t?.type === "web_customer" ? (m.user_id === null ? "them" : "me") : (String(m.user_id) === $("#chatAs").value ? "me" : "them");
+    return `${sep}<div class="bubble-row ${cls}"><div class="bubble">
+      <div class="b-name">${esc(m.user_name)}${m.user_id === null ? ' <span class="badge b-info">Khách</span>' : ""}</div>
+      <div class="b-text">${esc(m.text)}</div><div class="b-time">${m.sent_at.slice(11, 16)}</div></div></div>`;
+  }).join("") : `<p class="empty">Chưa có tin nhắn. Hãy gửi tin đầu tiên.</p>`;
+  box.scrollTop = box.scrollHeight;
+}
+async function loadChat() {
+  await loadThreads();
+  if (!CH.threads.some((t) => t.chat_id === CH.id)) CH.id = CH.threads[0]?.chat_id ?? -1;
+  $(".chat-wrap").classList.remove("open");
+  await openThread(CH.id, false);
+  clearInterval(CH.timer);
+  CH.timer = setInterval(async () => {
+    if (S.view !== "chat") return clearInterval(CH.timer);
+    const atBottom = $("#msgList").scrollHeight - $("#msgList").scrollTop - $("#msgList").clientHeight < 40;
+    await loadThreads(); if (atBottom) await openThread(CH.id, false);
+  }, 8000);
+}
+$("#chatAs").onchange = () => { ls.set("reporter", $("#chatAs").value); openThread(CH.id); };
+$("#convBack").onclick = () => $(".chat-wrap").classList.remove("open");
+$("#chatText").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("#chatForm").requestSubmit(); } });
+$("#chatForm").onsubmit = async (e) => {
+  e.preventDefault();
+  const text = $("#chatText").value.trim();
+  if (!$("#chatAs").value) return toast("Hãy chọn tên của bạn để gửi tin");
+  if (!text) return;
+  try {
+    await api("/api/chat/send", { body: { chat_id: CH.id, user_id: Number($("#chatAs").value), text } });
+    $("#chatText").value = ""; await loadThreads(); await openThread(CH.id);
+  } catch (err) { toast("❌ " + err.message); }
+};
+$("#newCustomerBtn").onclick = async () => {
+  const f = await dialog("Khách hàng mới", `<p class="muted">Ghi lại tin nhắn khách gửi (qua điện thoại, Zalo, email…). Khách cũng có thể tự nhắn ở trang /lienhe.html</p>
+    <label><span>Tên khách *</span><input name="name" required minlength="2" placeholder="VD: Anh Minh"></label>
+    <div class="grid-2"><label><span>Công ty</span><input name="company"></label><label><span>Số điện thoại</span><input name="phone"></label></div>
+    <label><span>Khách nhắn *</span><textarea name="text" rows="3" required></textarea></label>`);
+  if (!f) return;
+  try {
+    const r = await api("/api/chat/customer", { body: { ...f, user_id: Number($("#chatAs").value) || null } });
+    await loadThreads(); openThread(r.chat_id); toast("✅ Đã tạo cuộc trò chuyện với " + f.name);
+  } catch (err) { toast("❌ " + err.message); }
+};
 
 // ================= TỔNG QUAN =================
 $("#ovDate").onchange = loadOverview;

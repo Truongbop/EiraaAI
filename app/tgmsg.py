@@ -21,11 +21,12 @@ def upsert_chat(chat_id, title, ctype, active=True):
                   (chat_id, title, ctype, int(active), ts, ts))
 
 
-def save_message(chat_id, message_id, user_id, user_name, text, sent_at: datetime, kind="text", file_name=None):
+def save_message(chat_id, message_id, user_id, user_name, text, sent_at: datetime, kind="text", file_name=None, source="group"):
+    """source: group (tin nhắn nhóm) | private (chat riêng của tài khoản sếp) | forward (sếp chuyển tiếp cho bot)."""
     with db.conn() as c:
-        c.execute("""INSERT OR IGNORE INTO tg_messages(chat_id,message_id,user_id,user_name,kind,text,file_name,sent_at)
-                     VALUES(?,?,?,?,?,?,?,?)""",
-                  (chat_id, message_id, user_id, user_name, kind, text, file_name, sent_at.astimezone(VN_TZ).isoformat()))
+        c.execute("""INSERT OR IGNORE INTO tg_messages(chat_id,message_id,user_id,user_name,kind,text,file_name,sent_at,source)
+                     VALUES(?,?,?,?,?,?,?,?,?)""",
+                  (chat_id, message_id, user_id, user_name, kind, text, file_name, sent_at.astimezone(VN_TZ).isoformat(), source))
 
 
 def list_chats():
@@ -63,6 +64,61 @@ def find_chats(text):
         if title and (title in t or any(w in t for w in words)):
             found.append(ch["chat_id"])
     return found
+
+
+# ======================= Tin nhắn trên WEB (nội bộ + khách hàng) =======================
+INTERNAL_ID = -1                     # kênh chat nội bộ giữa đồng nghiệp
+
+
+def ensure_internal():
+    with db.conn() as c:
+        if not c.execute("SELECT 1 FROM tg_chats WHERE chat_id=?", (INTERNAL_ID,)).fetchone():
+            c.execute("INSERT INTO tg_chats(chat_id,title,type,active,added_at,updated_at) VALUES(?,?,?,?,?,?)",
+                      (INTERNAL_ID, "Chat nội bộ", "web_internal", 1, db.now().isoformat(), db.now().isoformat()))
+
+
+def customer_thread(name, company="", phone=""):
+    """Tìm hoặc tạo hội thoại khách hàng (theo số điện thoại, nếu không có thì theo tên)."""
+    import zlib
+    key = re.sub(r"\D", "", phone or "") or (name or "").strip().lower()
+    cid = -(10_000_000 + zlib.crc32(key.encode()) % 89_999_999)
+    title = (name or "Khách hàng").strip() + (f" – {company.strip()}" if company and company.strip() else "")
+    with db.conn() as c:
+        row = c.execute("SELECT title FROM tg_chats WHERE chat_id=?", (cid,)).fetchone()
+        if not row:
+            c.execute("INSERT INTO tg_chats(chat_id,title,type,active,added_at,updated_at) VALUES(?,?,?,?,?,?)",
+                      (cid, title + (f" ({phone.strip()})" if phone and phone.strip() else ""), "web_customer", 1,
+                       db.now().isoformat(), db.now().isoformat()))
+    return cid
+
+
+def post_web(chat_id, sender, text, user_id=None, sent_at=None):
+    """Lưu 1 tin nhắn web. Người gửi là nhân viên (user_id) hoặc khách hàng (user_id=None)."""
+    with db.conn() as c:
+        ch = c.execute("SELECT type FROM tg_chats WHERE chat_id=?", (chat_id,)).fetchone()
+        if not ch or ch["type"] not in ("web_internal", "web_customer"):
+            raise ValueError("Không tìm thấy cuộc trò chuyện")
+        mid = c.execute("SELECT COALESCE(MAX(message_id),0)+1 FROM tg_messages WHERE chat_id=?", (chat_id,)).fetchone()[0]
+        c.execute("UPDATE tg_chats SET updated_at=? WHERE chat_id=?", (db.now().isoformat(), chat_id))
+        source = ch["type"]
+    save_message(chat_id, mid, user_id, sender, text.strip(), sent_at or db.now(), source=source)
+
+
+def list_threads():
+    ensure_internal()
+    with db.conn() as c:
+        return db.rows(c, """SELECT ch.chat_id, ch.title, ch.type, COUNT(m.id) AS total, MAX(m.sent_at) AS last_at,
+                                    (SELECT text FROM tg_messages x WHERE x.chat_id=ch.chat_id ORDER BY x.sent_at DESC LIMIT 1) AS last_text,
+                                    (SELECT user_id IS NULL FROM tg_messages x WHERE x.chat_id=ch.chat_id ORDER BY x.sent_at DESC LIMIT 1) AS waiting
+                             FROM tg_chats ch LEFT JOIN tg_messages m ON m.chat_id=ch.chat_id
+                             WHERE ch.type IN ('web_internal','web_customer')
+                             GROUP BY ch.chat_id ORDER BY ch.type DESC, last_at DESC""")
+
+
+def thread_messages(chat_id, limit=300):
+    with db.conn() as c:
+        rows = db.rows(c, "SELECT * FROM tg_messages WHERE chat_id=? ORDER BY sent_at DESC, id DESC LIMIT ?", (chat_id, limit))
+    return rows[::-1]
 
 
 # ======================= Phân tích không cần AI =======================
@@ -126,7 +182,8 @@ def _rule_analyze(msgs):
         if (TASK_RE.search(t) or MENTION_RE.search(raw) or pct) and not is_issue_only and not is_proposal:
             mention = MENTION_RE.search(raw)
             dl = DEADLINE_RE.search(t)
-            status = "Hoàn thành" if DONE_RE.search(t) and not re.search(r"\bcần\b|\bphải\b", t) else (
+            planned = re.search(r"\b(dự kiến|sẽ|cần|phải)\b", t)
+            status = "Hoàn thành" if DONE_RE.search(t) and not planned else (
                 "Đang làm" if DOING_RE.search(t) else "Chưa làm")
             tasks.append({"cong_viec": raw[:300], "nguoi_phu_trach": mention[1] if mention else who,
                           "thoi_han": dl[0] if dl else UNKNOWN, "trang_thai": status,
@@ -193,28 +250,35 @@ def _reports_part(start, end, department=None):
 
 
 # ======================= Phân tích bằng ChatGPT =======================
-PROMPT = """Bạn là EIRAA AI – trợ lý tổng hợp cho giám đốc. Dữ liệu gồm 3 phần: (1) tin nhắn trao đổi trong các nhóm Telegram,
-(2) tiến độ công việc được giao, (3) nội dung các bài báo cáo nhân viên nộp (file Excel/Word). Viết tiếng Việt, ngắn gọn.
-QUY TẮC: chỉ dùng thông tin có trong dữ liệu, KHÔNG suy diễn; thiếu thông tin ghi "Chưa xác định".
+PROMPT = """Bạn là EIRAA AI – trợ lý tổng hợp cho giám đốc. Dữ liệu gồm: (1) tin nhắn KHÁCH HÀNG gửi tới công ty và nhân viên trả lời,
+(2) tin nhắn trao đổi giữa ĐỒNG NGHIỆP (chat nội bộ, nhóm), (3) tiến độ công việc, (4) nội dung các bài báo cáo nhân viên nộp.
+Viết tiếng Việt, ngắn gọn. QUY TẮC: chỉ dùng thông tin có trong dữ liệu, KHÔNG suy diễn; thiếu thông tin ghi "Chưa xác định".
 Trả về JSON:
-{"tom_tat": "6-10 câu tổng hợp CHUNG cả tin nhắn, tiến độ công việc và báo cáo: kết quả nổi bật, việc chậm, điểm sếp cần chú ý",
- "theo_nhom": [{"ten": "nhóm công việc (Kinh doanh, Kỹ thuật, Tài chính, Nhân sự, Marketing, ...)", "noi_dung": ["ý chính"]}],
- "dau_viec": [{"cong_viec": "việc nhắc tới trong tin nhắn", "nguoi_phu_trach": "...", "thoi_han": "...", "trang_thai": "Chưa làm|Đang làm|Hoàn thành", "tien_do": "vd 60%"}],
+{"tom_tat": "6-10 câu tổng hợp chung: khách hàng cần gì, đồng nghiệp đang làm gì, tiến độ, việc chậm, điểm sếp cần chú ý",
+ "khach_hang": [{"ten": "tên khách / hội thoại", "tom_tat": "khách cần gì, đã trả lời chưa, bước tiếp theo"}],
+ "theo_nhom": [{"ten": "nhóm công việc (Kinh doanh, Kỹ thuật, Tài chính, Nhân sự, Marketing, ...)", "noi_dung": ["ý chính tin nhắn đồng nghiệp"]}],
+ "dau_viec": [{"cong_viec": "...", "nguoi_phu_trach": "...", "thoi_han": "...", "trang_thai": "Chưa làm|Đang làm|Hoàn thành", "tien_do": "vd 60%"}],
  "van_de": [{"van_de": "...", "nguoi_lien_quan": "...", "muc_do": "Cao|Trung bình|Thấp", "de_xuat": "..."}],
  "de_xuat": [{"noi_dung": "...", "nguoi": "..."}],
- "bao_cao": [{"nguoi": "tên người nộp", "noi_dung_chinh": "1-2 câu tóm tắt nội dung bài báo cáo của người đó"}],
- "thong_tin_quan_trong": ["thông tin quan trọng khác"]}"""
+ "bao_cao": [{"nguoi": "tên người nộp", "noi_dung_chinh": "1-2 câu tóm tắt bài báo cáo"}],
+ "thong_tin_quan_trong": ["..."]}"""
+
+
+def _src_label(m):
+    return {"web_customer": f"Khách hàng – {m.get('chat_title')}", "web_internal": "Nội bộ"}.get(m.get("source"),
+                                                                                                f"Nhóm {m.get('chat_title')}")
 
 
 def _ai_analyze(msgs, part):
     c = ai.client()
     if not c:
         return None
-    text = ["(1) TIN NHẮN:"] + [f"[{m['chat_title']}] [{m['sent_at'][5:10]} {m['sent_at'][11:16]}] {_short(m['user_name'])}: {m['text']}"
-                                 for m in msgs]
-    text += ["", "(2) TIẾN ĐỘ CÔNG VIỆC:"] + [f"- {t['title']} – {t['assignee']} – hạn {t['deadline'] or 'chưa có'} – {t['status']} {t['progress']}%"
+    text = ["(1)(2) TIN NHẮN:"] + [f"[{_src_label(m)}] [{m['sent_at'][5:10]} {m['sent_at'][11:16]}] "
+                                    f"{_short(m['user_name'])}{'' if m.get('user_id') or m.get('source') != 'web_customer' else ' (khách)'}: {m['text']}"
+                                    for m in msgs]
+    text += ["", "(3) TIẾN ĐỘ CÔNG VIỆC:"] + [f"- {t['title']} – {t['assignee']} – hạn {t['deadline'] or 'chưa có'} – {t['status']} {t['progress']}%"
                                              + (" – QUÁ HẠN" if t["qua_han"] else "") for t in part["tasks"]]
-    text += ["", "(3) BÁO CÁO ĐÃ NỘP:"] + [f"- {r['nguoi']} ({r['phong']}) [{r['ngay']}] chủ đề: {r['chu_de']}\n  Nội dung: {r['noi_dung']}"
+    text += ["", "(4) BÁO CÁO ĐÃ NỘP:"] + [f"- {r['nguoi']} ({r['phong']}) [{r['ngay']}] chủ đề: {r['chu_de']}\n  Nội dung: {r['noi_dung']}"
                                           for r in part["reports"]]
     text += ["Chưa nộp: " + (", ".join(m["full_name"] for m in part["missing"]) or "không")]
     try:
@@ -222,7 +286,7 @@ def _ai_analyze(msgs, part):
                                       messages=[{"role": "system", "content": PROMPT},
                                                 {"role": "user", "content": "\n".join(text)[-100_000:]}])
         d = json.loads(r.choices[0].message.content)
-        for k in ("theo_nhom", "dau_viec", "van_de", "de_xuat", "bao_cao", "thong_tin_quan_trong"):
+        for k in ("khach_hang", "theo_nhom", "dau_viec", "van_de", "de_xuat", "bao_cao", "thong_tin_quan_trong"):
             d[k] = d.get(k) or []
         d["tom_tat"] = d.get("tom_tat") or ""
         d["ai"] = True
@@ -232,16 +296,51 @@ def _ai_analyze(msgs, part):
         return None
 
 
+# ======================= Hội thoại khách hàng (không cần AI) =======================
+KEY_RE = re.compile(r"\b(giá|báo giá|đơn|đặt|hợp đồng|thanh toán|giao hàng|lỗi|không|gấp|khi nào|bao giờ|bảo hành|đổi|trả|hủy|chiết khấu|giảm)\b", re.I)
+
+
+def _customer_threads(msgs):
+    threads = {}
+    for m in msgs:
+        if m.get("source") == "web_customer":
+            threads.setdefault(m["chat_id"], []).append(m)
+    out = []
+    for cid, ms in threads.items():
+        from_customer = [m for m in ms if m.get("user_id") is None]
+        key = [m for m in from_customer if KEY_RE.search(m["text"] or "")] or from_customer
+        last = ms[-1]
+        waiting = last.get("user_id") is None
+        staff = sorted({_short(m["user_name"]) for m in ms if m.get("user_id") is not None})
+        out.append({"chat_id": cid, "ten": ms[0].get("chat_title") or "Khách hàng", "so_tin": len(ms),
+                    "lan_cuoi": last["sent_at"], "cho_phan_hoi": waiting, "nhan_vien": staff,
+                    "noi_dung": [m["text"][:160] for m in key[-3:]],
+                    "tra_loi_cuoi": next((m["text"][:160] for m in reversed(ms) if m.get("user_id") is not None), "")})
+    return sorted(out, key=lambda x: (not x["cho_phan_hoi"], x["lan_cuoi"]), reverse=False)
+
+
 # ======================= Dựng bản tổng hợp =======================
 def build(period_text="hôm nay", chat_ids=None):
     start, end, label = summary.parse_period(period_text)
     chat_ids = chat_ids if chat_ids is not None else (find_chats(period_text) or None)
     department = summary.find_department(period_text)
     msgs = get_messages(start, end, chat_ids)
+    cus_msgs = [m for m in msgs if m.get("source") == "web_customer"]
+    col_msgs = [m for m in msgs if m.get("source") != "web_customer"]
     part = _reports_part(start, end, department)
-    a = ((_ai_analyze(msgs, part) if (msgs or part["reports"]) else None) or _rule_analyze(msgs))
-    chats = sorted({m["chat_title"] or str(m["chat_id"]) for m in msgs})
-    users = sorted({_short(m["user_name"]) for m in msgs})
+    a = (_ai_analyze(msgs, part) if (msgs or part["reports"]) else None)
+    if not a:
+        a = _rule_analyze(col_msgs)
+        cus_issues = _rule_analyze([m for m in cus_msgs if m.get("user_id") is None])["van_de"]   # chỉ tin khách gửi
+        for v in cus_issues:
+            v["nguoi_lien_quan"] = "Khách " + (v.get("nguoi_lien_quan") or "")
+        a["van_de"] = cus_issues + a["van_de"]
+        a["khach_hang"] = []
+    threads = _customer_threads(msgs)
+    ai_cus = {x.get("ten"): x.get("tom_tat") for x in a.get("khach_hang", [])}
+    for t in threads:
+        t["tom_tat"] = ai_cus.get(t["ten"]) or " · ".join(t["noi_dung"])
+    chats = sorted({m["chat_title"] or str(m["chat_id"]) for m in col_msgs if m.get("source") != "web_internal"})
     tasks = part["tasks"]
     t_done = [t for t in tasks if t["status"] == "Hoàn thành"]
     t_doing = [t for t in tasks if t["status"] == "Đang làm" and not t["qua_han"]]
@@ -251,16 +350,26 @@ def build(period_text="hôm nay", chat_ids=None):
     ai_report = {x.get("nguoi"): x.get("noi_dung_chinh") for x in a.get("bao_cao", [])}
     for r in reps:
         r["tom_tat"] = ai_report.get(r["nguoi"]) or r["noi_dung"]
+    waiting = [t for t in threads if t["cho_phan_hoi"]]
 
     if not a.get("ai"):   # tóm tắt chung khi chưa có AI
-        parts = [a["tom_tat"]] if msgs else ["Chưa có tin nhắn nhóm trong kỳ."]
-        parts.append(f"Báo cáo: {len({r['nguoi'] for r in reps})}/{len(staff)} nhân viên đã nộp ({len(reps)} bài).")
+        parts = []
+        parts.append(f"Khách hàng: {len(threads)} cuộc trò chuyện ({len(cus_msgs)} tin), "
+                     + (f"{len(waiting)} khách đang chờ phản hồi." if waiting else "tất cả đã được phản hồi."))
+        if col_msgs:
+            parts.append(a["tom_tat"].replace("Có ", "Đồng nghiệp: ", 1))
+        else:
+            parts.append("Đồng nghiệp: chưa có tin nhắn trao đổi.")
+        parts.append(f"Báo cáo: {len({r['nguoi'] for r in reps})}/{len(staff)} nhân viên đã nộp.")
         parts.append(f"Công việc: {len(t_done)} hoàn thành, {len(t_doing)} đang làm, {len(t_todo)} chưa làm, {len(t_late)} quá hạn.")
         a["tom_tat"] = " ".join(parts)
 
-    rows = [{"hang_muc": "Tin nhắn – việc", "noi_dung": t.get("cong_viec", ""), "nguoi": t.get("nguoi_phu_trach") or UNKNOWN,
-             "thoi_han": t.get("thoi_han") or UNKNOWN,
-             "trang_thai": (t.get("trang_thai") or UNKNOWN) + (f" ({t['tien_do']})" if t.get("tien_do") else "")} for t in a["dau_viec"]]
+    rows = [{"hang_muc": "Khách hàng", "noi_dung": f"{t['ten']}: {t['tom_tat']}", "nguoi": ", ".join(t["nhan_vien"]) or UNKNOWN,
+             "thoi_han": t["lan_cuoi"][11:16] + " " + summary._fmt_date(t["lan_cuoi"][:10]),
+             "trang_thai": "Chờ phản hồi" if t["cho_phan_hoi"] else "Đã phản hồi"} for t in threads]
+    rows += [{"hang_muc": "Tin nhắn – việc", "noi_dung": t.get("cong_viec", ""), "nguoi": t.get("nguoi_phu_trach") or UNKNOWN,
+              "thoi_han": t.get("thoi_han") or UNKNOWN,
+              "trang_thai": (t.get("trang_thai") or UNKNOWN) + (f" ({t['tien_do']})" if t.get("tien_do") else "")} for t in a["dau_viec"]]
     rows += [{"hang_muc": "Vấn đề", "noi_dung": v.get("van_de", ""), "nguoi": v.get("nguoi_lien_quan") or UNKNOWN,
               "thoi_han": UNKNOWN, "trang_thai": f"Cần xử lý – mức {v.get('muc_do') or UNKNOWN}"} for v in a["van_de"]]
     rows += [{"hang_muc": "Đề xuất", "noi_dung": p.get("noi_dung", ""), "nguoi": p.get("nguoi") or UNKNOWN,
@@ -273,65 +382,83 @@ def build(period_text="hôm nay", chat_ids=None):
     rows += [{"hang_muc": "Chưa nộp", "noi_dung": f"Chưa nộp báo cáo ({m['ngay_thieu']})", "nguoi": m["full_name"],
               "thoi_han": UNKNOWN, "trang_thai": "Chưa nộp"} for m in missing]
 
-    scope = (" – " + ", ".join(chats).upper()) if chat_ids and chats else (f" – {department.upper()}" if department else "")
+    scope = (f" – {department.upper()}" if department else "")
     return {
         "kind": "tin_nhan", "title": f"TỔNG HỢP TIN NHẮN & TIẾN ĐỘ CÔNG VIỆC {label.upper()}{scope}", "label": label,
-        "generated_at": db.now().strftime("%H:%M %d/%m/%Y"), "source": "tin nhắn nhóm Telegram + tiến độ công việc + báo cáo nhân viên",
-        "stat_lines": [("Tin nhắn", len(msgs)), ("Nhóm Telegram", len(chats)),
+        "generated_at": db.now().strftime("%H:%M %d/%m/%Y"),
+        "source": "tin nhắn khách hàng & đồng nghiệp trên web + tiến độ công việc + báo cáo nhân viên",
+        "stat_lines": [("Tin nhắn khách hàng", len(cus_msgs)), ("Khách chờ phản hồi", len(waiting)),
+                       ("Tin nhắn đồng nghiệp", len(col_msgs)),
                        ("Đã nộp báo cáo", f"{len({r['nguoi'] for r in reps})}/{len(staff)}"),
                        ("Việc hoàn thành", len(t_done)), ("Việc đang làm", len(t_doing)), ("Việc quá hạn", len(t_late)),
                        ("Vấn đề cần xử lý", len(a["van_de"]))],
-        "group_label": "Nội dung tin nhắn theo nhóm công việc",
+        "group_label": "Tin nhắn đồng nghiệp theo nhóm công việc",
         "theo_phong_ban": [{"ten": g["ten"], "tom_tat": "; ".join(g.get("noi_dung", [])[:6])} for g in a["theo_nhom"]],
-        "rui_ro": [f"[{v.get('muc_do') or UNKNOWN}] {v.get('nguoi_lien_quan') or ''}: {v.get('van_de', '')}" for v in a["van_de"]][:10]
+        "rui_ro": [f"Khách chờ phản hồi: {t['ten']}" for t in waiting]
+                  + [f"[{v.get('muc_do') or UNKNOWN}] {v.get('nguoi_lien_quan') or ''}: {v.get('van_de', '')}" for v in a["van_de"]][:10]
                   + [f"Quá hạn: {t['title']} ({t['assignee']}, hạn {summary._fmt_date(t['deadline'])})" for t in t_late],
         "goi_y": a.get("thong_tin_quan_trong", [])[:5],
         "tom_tat": a["tom_tat"], "ai": a.get("ai", False), "rows": rows,
-        "analysis": a, "messages": msgs, "chats": chats, "users": users,
+        "analysis": a, "messages": msgs, "chats": chats, "threads": threads, "col_count": len(col_msgs),
         "task_groups": {"done": t_done, "doing": t_doing, "todo": t_todo, "late": t_late},
         "report_items": reps, "missing_staff": missing, "staff_count": len(staff),
         "extra_sheets": [
+            ("Khách hàng", ["Khách hàng", "Số tin", "Lần cuối", "Trạng thái", "Nhân viên phụ trách", "Nội dung chính", "Trả lời gần nhất"],
+             [[t["ten"], t["so_tin"], t["lan_cuoi"][:16].replace("T", " "), "Chờ phản hồi" if t["cho_phan_hoi"] else "Đã phản hồi",
+               ", ".join(t["nhan_vien"]), t["tom_tat"], t["tra_loi_cuoi"]] for t in threads], [26, 8, 17, 14, 22, 70, 50]),
             ("Tiến độ công việc", ["Công việc", "Phụ trách", "Phòng ban", "Hạn", "Trạng thái", "Tiến độ %", "Quá hạn"],
              [[t["title"], t["assignee"], t["department"], summary._fmt_date(t["deadline"]), t["status"], t["progress"],
                "Có" if t["qua_han"] else ""] for t in tasks], [44, 22, 16, 12, 14, 10, 9]),
             ("Nội dung báo cáo", ["Ngày", "Người nộp", "Phòng ban", "Chủ đề", "Nội dung chính", "Tệp"],
              [[summary._fmt_date(r["ngay"]), r["nguoi"], r["phong"], r["chu_de"], r["tom_tat"], r["tep"]] for r in reps],
              [12, 20, 14, 32, 80, 28]),
-            ("Theo nhóm công việc", ["Nhóm công việc", "Nội dung tin nhắn"],
+            ("Đồng nghiệp – theo nhóm", ["Nhóm công việc", "Nội dung tin nhắn"],
              [[g["ten"], x] for g in a["theo_nhom"] for x in g.get("noi_dung", [])], [26, 100]),
-            ("Tin nhắn gốc", ["Thời gian", "Nhóm", "Người gửi", "Nội dung"],
-             [[m["sent_at"][:16].replace("T", " "), m.get("chat_title") or "", m["user_name"], m["text"]] for m in msgs],
-             [17, 22, 22, 100]),
+            ("Tin nhắn gốc", ["Thời gian", "Loại", "Cuộc trò chuyện", "Người gửi", "Nội dung"],
+             [[m["sent_at"][:16].replace("T", " "), {"web_customer": "Khách hàng", "web_internal": "Đồng nghiệp"}.get(m.get("source"), "Nhóm Telegram"),
+               m.get("chat_title") or "", m["user_name"], m["text"]] for m in msgs], [17, 14, 26, 22, 90]),
         ],
         "stats": {}, "missing": [], "overdue": [], "open_tasks": [], "reports": [],
     }
 
 
+def _hm(iso):
+    return f"{iso[11:16]} {iso[8:10]}/{iso[5:7]}"
+
+
 def to_message(rep, detail=True):
     a, tg = rep["analysis"], rep["task_groups"]
-    msgs, reps = rep["messages"], rep["report_items"]
+    reps, threads = rep["report_items"], rep["threads"]
     L = [f"📊 {rep['title']}", f"🕒 Lập lúc {rep['generated_at']}" + ("" if rep.get("ai") else " · chế độ cơ bản (chưa bật AI)"),
          "", "📝 TÓM TẮT CHUNG", rep["tom_tat"]]
 
-    # 1. Nội dung tin nhắn
-    L += ["", "━━━━━━━━━━━━━━", f"1️⃣ NỘI DUNG TIN NHẮN ({len(msgs)} tin · {len(rep['chats'])} nhóm)"]
-    if not msgs:
-        L.append("Chưa có tin nhắn nào. Thêm bot vào nhóm Telegram (tắt Privacy Mode trong @BotFather) để bot ghi nhận.")
-    else:
-        L.append("Nhóm: " + ", ".join(rep["chats"]))
-        for g in a["theo_nhom"][:5]:
-            items = g.get("noi_dung", [])
-            L.append(f"▸ {g['ten']} ({len(items)})")
-            L += [f"   • {x[:140]}" for x in items[:2]]
-        if a["van_de"]:
-            L += ["⚠️ Vấn đề cần xử lý:"] + [f"   • [{v.get('muc_do') or UNKNOWN}] {v.get('nguoi_lien_quan') or ''}: {v.get('van_de', '')[:140]}"
-                                         for v in sorted(a["van_de"], key=lambda v: v.get("muc_do") != "Cao")[:5]]
-        if a["de_xuat"]:
-            L += ["💡 Đề xuất:"] + [f"   • {p.get('nguoi') or ''}: {p.get('noi_dung', '')[:140]}" for p in a["de_xuat"][:3]]
+    # 1. Khách hàng
+    waiting = [t for t in threads if t["cho_phan_hoi"]]
+    L += ["", "━━━━━━━━━━━━━━", f"1️⃣ TIN NHẮN KHÁCH HÀNG ({len(threads)} khách · ⏳ {len(waiting)} chờ phản hồi)"]
+    if not threads:
+        L.append("Không có tin nhắn khách hàng.")
+    for t in threads[:10]:
+        L.append(f"{'⏳' if t['cho_phan_hoi'] else '✅'} {t['ten']} – {t['so_tin']} tin, lần cuối {_hm(t['lan_cuoi'])}"
+                 + ("" if t["cho_phan_hoi"] else f" · {', '.join(t['nhan_vien'])} đã trả lời"))
+        L.append(f"   {t['tom_tat'][:230]}")
 
-    # 2. Tiến độ công việc
+    # 2. Đồng nghiệp
+    L += ["", "━━━━━━━━━━━━━━", f"2️⃣ TIN NHẮN ĐỒNG NGHIỆP ({rep['col_count']} tin)"]
+    if not rep["col_count"]:
+        L.append("Chưa có tin nhắn trao đổi.")
+    for g in a["theo_nhom"][:5]:
+        items = g.get("noi_dung", [])
+        L.append(f"▸ {g['ten']} ({len(items)})")
+        L += [f"   • {x[:140]}" for x in items[:2]]
+    if a["van_de"]:
+        L += ["⚠️ Vấn đề cần xử lý:"] + [f"   • [{v.get('muc_do') or UNKNOWN}] {v.get('nguoi_lien_quan') or ''}: {v.get('van_de', '')[:140]}"
+                                     for v in sorted(a["van_de"], key=lambda v: v.get("muc_do") != "Cao")[:6]]
+    if a["de_xuat"]:
+        L += ["💡 Đề xuất:"] + [f"   • {p.get('nguoi') or ''}: {p.get('noi_dung', '')[:140]}" for p in a["de_xuat"][:3]]
+
+    # 3. Tiến độ công việc
     L += ["", "━━━━━━━━━━━━━━",
-          f"2️⃣ TIẾN ĐỘ CÔNG VIỆC (✅ {len(tg['done'])} xong · ⏳ {len(tg['doing'])} đang làm · 🔲 {len(tg['todo'])} chưa làm · ⏰ {len(tg['late'])} quá hạn)"]
+          f"3️⃣ TIẾN ĐỘ CÔNG VIỆC (✅ {len(tg['done'])} xong · ⏳ {len(tg['doing'])} đang làm · 🔲 {len(tg['todo'])} chưa làm · ⏰ {len(tg['late'])} quá hạn)"]
     fmt = lambda t, ic: f"{ic} {t['title']} — {t['assignee'] or UNKNOWN} · {t['progress']}% · hạn {summary._fmt_date(t['deadline'])}"
     L += [fmt(t, "⏰") for t in tg["late"]] + [fmt(t, "⏳") for t in tg["doing"]] + [fmt(t, "🔲") for t in tg["todo"]] + [fmt(t, "✅") for t in tg["done"]]
     if a["dau_viec"]:
@@ -340,12 +467,12 @@ def to_message(rep, detail=True):
             f"   {icon.get(t.get('trang_thai'), '🔲')} {t.get('cong_viec', '')[:130]} — {t.get('nguoi_phu_trach') or UNKNOWN}"
             + (f" · {t['tien_do']}" if t.get("tien_do") else "") for t in a["dau_viec"][:6]]
 
-    # 3. Nội dung các bài báo cáo
-    L += ["", "━━━━━━━━━━━━━━", f"3️⃣ NỘI DUNG BÁO CÁO ({len({r['nguoi'] for r in reps})}/{rep['staff_count']} người đã nộp)"]
+    # 4. Nội dung các bài báo cáo
+    L += ["", "━━━━━━━━━━━━━━", f"4️⃣ NỘI DUNG BÁO CÁO ({len({r['nguoi'] for r in reps})}/{rep['staff_count']} người đã nộp)"]
     if not reps:
         L.append("Chưa có báo cáo nào trong kỳ.")
     for r in reps[:15]:
-        day = f"[{r['ngay'][8:10]}/{r['ngay'][5:7]}] " if rep["label"] and not rep["label"].startswith("hôm") else ""
+        day = f"[{r['ngay'][8:10]}/{r['ngay'][5:7]}] " if not rep["label"].startswith("hôm") else ""
         L.append(f"📄 {day}{r['nguoi']} – {r['chu_de']}")
         L.append(f"   {r['tom_tat'] if len(r['tom_tat']) <= 230 else r['tom_tat'][:230].rsplit(' ', 1)[0] + '…'}")
     if len(reps) > 15:
