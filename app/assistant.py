@@ -82,7 +82,7 @@ def tool_attachments(ten=None, ky="hôm nay", _files=None):
 
 
 def is_message_question(t):
-    return bool(re.search(r"tin nhắn|tin nhan|\bnt\b|\btn\b|nhóm chat|nhóm tele|\btele\b|telegram|trao đổi|\bchat\b|\bgroup\b|\bnhóm\b", t))
+    return bool(re.search(r"tin nhắn|tin nhan|nhóm chat|nhóm tele|\btele\b|telegram|trao đổi|\bchat\b|\bgroup\b|\bnhóm\b", t))
 
 
 def tool_messages(ky="hôm nay", nhom=None, xuat_file=None, _files=None):
