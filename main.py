@@ -371,6 +371,15 @@ def audit():
         return db.rows(c, "SELECT * FROM audit ORDER BY id DESC LIMIT 100")
 
 
+@api.middleware("http")
+async def no_cache_web(request, call_next):
+    """Luôn tải bản web mới nhất (tránh trình duyệt giữ file JS/CSS cũ sau khi cập nhật)."""
+    resp = await call_next(request)
+    if not request.url.path.startswith("/api/"):
+        resp.headers["Cache-Control"] = "no-cache"
+    return resp
+
+
 api.mount("/", StaticFiles(directory=BASE_DIR / "web", html=True), name="web")
 
 if __name__ == "__main__":

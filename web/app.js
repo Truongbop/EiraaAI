@@ -191,7 +191,8 @@ $("#chatText").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.
 $("#chatForm").onsubmit = async (e) => {
   e.preventDefault();
   const text = $("#chatText").value.trim();
-  if (!$("#chatAs").value) return toast("Hãy chọn tên của bạn để gửi tin");
+  if (!$("#chatAs").value) { $("#chatAs").focus(); $("#chatAs").classList.add("need"); return toast("👈 Chọn tên của bạn ở ô “Gửi với tên” trước khi gửi"); }
+  $("#chatAs").classList.remove("need");
   if (!text) return;
   try {
     await api("/api/chat/send", { body: { chat_id: CH.id, user_id: Number($("#chatAs").value), text } });

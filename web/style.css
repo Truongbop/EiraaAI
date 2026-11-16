@@ -119,3 +119,5 @@ details summary{cursor:pointer;margin-top:4px}
 }
 .chat-wrap{grid-template-rows:minmax(0,1fr)}.conv,.threads{min-height:0}.msgs{min-height:0}
 @media (max-width:860px){.chat-wrap{height:calc(100dvh - 100px)}.conv-head b{font-size:15px}}
+
+.need{outline:3px solid var(--bad)!important}
