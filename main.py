@@ -99,7 +99,9 @@ def _user(uid):
 
 @api.get("/api/info")
 def info():
-    return {"company": COMPANY_NAME, "today": db.today().isoformat(), "bot": BOT["username"], "bot_error": BOT["error"]}
+    from app import __version__
+    return {"company": COMPANY_NAME, "today": db.today().isoformat(), "bot": BOT["username"], "bot_error": BOT["error"],
+            "version": __version__}
 
 
 # ================= Báo cáo ngày =================

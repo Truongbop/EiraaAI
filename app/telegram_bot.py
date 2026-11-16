@@ -97,8 +97,18 @@ async def send_reply(bot, chat_id, reply: assistant.Reply, keyboard=None):
             cur = f"{cur}\n{line}" if cur else line
     if cur:
         chunks.append(cur)
+    html = reply.html or "<b>" in text
     for i, ch in enumerate(chunks):
-        await bot.send_message(chat_id, ch, reply_markup=keyboard if i == len(chunks) - 1 else None)
+        kb = keyboard if i == len(chunks) - 1 else None
+        if html:
+            try:
+                await bot.send_message(chat_id, ch, parse_mode="HTML", reply_markup=kb, disable_web_page_preview=True)
+                continue
+            except Exception as err:                 # HTML lỗi -> gửi chữ thường
+                log.warning("Gửi HTML lỗi, chuyển sang chữ thường: %s", err)
+                import html as _h
+                ch = _h.unescape(re.sub(r"</?(b|i|u|code)>", "", ch))
+        await bot.send_message(chat_id, ch, reply_markup=kb)
     for f in reply.files:
         path, name = (f if isinstance(f, tuple) else (f, Path(f).name))
         await bot.send_chat_action(chat_id, ChatAction.UPLOAD_DOCUMENT)
@@ -239,7 +249,7 @@ def _msg_files_only(period_text, formats):
 
 def _msg_report(period_text, chat_ids=None, formats=None):
     rep = tgmsg.build(period_text, chat_ids)
-    return assistant.Reply(tgmsg.to_message(rep), exporter.export(rep, formats) if formats else [])
+    return assistant.Reply(tgmsg.to_message(rep), exporter.export(rep, formats) if formats else [], html=True)
 
 
 # ---------- Tin nhắn nhóm: ghi nhận ----------
@@ -322,7 +332,7 @@ async def notify_bosses(text, files=None, keyboard=None):
 async def job_daily(ctx):
     rep = await asyncio.to_thread(tgmsg.build, "hôm nay")
     for bid in boss_ids():
-        await send_reply(ctx.bot, bid, assistant.Reply("⏰ Tổng hợp tự động cuối ngày\n\n" + tgmsg.to_message(rep)), EXPORT_KB)
+        await send_reply(ctx.bot, bid, assistant.Reply("⏰ <b>Tổng hợp tự động cuối ngày</b>\n\n" + tgmsg.to_message(rep), html=True), EXPORT_KB)
 
 
 async def job_remind(ctx):

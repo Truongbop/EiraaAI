@@ -11,6 +11,7 @@ ALL_FORMATS = ["xlsx", "docx", "pdf"]
 class Reply:
     text: str
     files: list = field(default_factory=list)   # đường dẫn file cần gửi kèm
+    html: bool = False                          # True: text là HTML của Telegram (chữ đậm, nghiêng)
 
 
 # ---------- Các "công cụ" tra cứu dữ liệu ----------
@@ -205,7 +206,7 @@ def answer_basic(question: str) -> Reply:
         if m := re.search(r"nhóm\s+([A-Za-zÀ-ỹ0-9 ]{2,40}?)(?:\s+(?:hôm|tuần|tháng|ngày|gửi|xuất)|$)", t):
             nhom = m[1].strip()
         text = tool_messages(t, nhom, wants_files(t), files)
-        return Reply(text, files)
+        return Reply(text, files, html=True)
     if "chưa nộp" in t or "chưa báo cáo" in t or "ai chưa" in t:
         return Reply(tool_missing(t, dep))
     if "quá hạn" in t or "trễ hạn" in t:

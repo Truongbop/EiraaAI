@@ -242,5 +242,6 @@ def to_txt(rep, path):
         from .tgmsg import to_message
     else:
         from .summary import to_message
-    lines = [to_message(rep), "", "CHI TIẾT:"] + [f"{r[0]}. [{r[1]}] {r[2]} | {r[3]} | {r[4]} | {r[5]}" for r in _table_rows(rep)]
+    import html as _h, re as _re
+    lines = [_h.unescape(_re.sub(r"</?(b|i|u|code)>", "", to_message(rep))), "", "CHI TIẾT:"] + [f"{r[0]}. [{r[1]}] {r[2]} | {r[3]} | {r[4]} | {r[5]}" for r in _table_rows(rep)]
     Path(path).write_text("\n".join(lines), encoding="utf-8")

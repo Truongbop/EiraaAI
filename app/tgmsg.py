@@ -426,57 +426,131 @@ def _hm(iso):
     return f"{iso[11:16]} {iso[8:10]}/{iso[5:7]}"
 
 
+def _cut(text, n):
+    text = re.sub(r"\s+", " ", text or "").strip()
+    return text if len(text) <= n else text[:n].rsplit(" ", 1)[0] + "…"
+
+
+def _split_title(title):
+    """'Anh Minh – Công ty Minh Phát (0901234567)' -> ('Anh Minh', 'Công ty Minh Phát')."""
+    t = re.sub(r"\s*\([\d +.]+\)\s*$", "", title or "")
+    name, _, company = t.partition(" – ")
+    return name.strip() or "Khách hàng", company.strip()
+
+
+def _first_name(full):
+    """Tên gọi ngắn: 'Lê Minh Hùng' -> 'Hùng'; tên dễ nhầm như 'Anh' -> 'Đức Anh'."""
+    parts = re.sub(r"\s*\(.*?\)", "", full or "").split()
+    if not parts:
+        return ""
+    if parts[-1].lower() in ("anh", "em", "chị") and len(parts) > 1:
+        return " ".join(parts[-2:])
+    return parts[-1]
+
+
 def to_message(rep, detail=True):
+    """Bản tổng hợp gửi Telegram (định dạng HTML)."""
+    from html import escape as e
     a, tg = rep["analysis"], rep["task_groups"]
     reps, threads = rep["report_items"], rep["threads"]
-    L = [f"📊 {rep['title']}", f"🕒 Lập lúc {rep['generated_at']}" + ("" if rep.get("ai") else " · chế độ cơ bản (chưa bật AI)"),
-         "", "📝 TÓM TẮT CHUNG", rep["tom_tat"]]
-
-    # 1. Khách hàng
     waiting = [t for t in threads if t["cho_phan_hoi"]]
-    L += ["", "━━━━━━━━━━━━━━", f"1️⃣ TIN NHẮN KHÁCH HÀNG ({len(threads)} khách · ⏳ {len(waiting)} chờ phản hồi)"]
+    col_issues = [v for v in a["van_de"] if not str(v.get("nguoi_lien_quan") or "").startswith("Khách ")]
+    urgent = [v for v in col_issues if v.get("muc_do") == "Cao"]
+    watch = [v for v in col_issues if v.get("muc_do") != "Cao"]
+    n_rep = len({r["nguoi"] for r in reps})
+    SEP = "━━━━━━━━━━━━━━━━"
+
+    L = [f"📊 <b>TỔNG HỢP TIN NHẮN</b>",
+         f"📅 {e(rep['label'][:1].upper() + rep['label'][1:])} · 🕒 {rep['generated_at'][:5]}"
+         + ("" if rep.get("ai") else " · <i>chế độ cơ bản</i>"),
+         "",
+         "📌 <b>TÓM TẮT NHANH</b>",
+         f"👥 Khách hàng: <b>{len(threads)}</b> khách" + (f" · ⏳ <b>{len(waiting)} chờ phản hồi</b>" if waiting else " · ✅ đã trả lời hết"),
+         f"💬 Đồng nghiệp: <b>{rep['col_count']}</b> tin nhắn" + (f" · 🔴 <b>{len(urgent)} việc gấp</b>" if urgent else ""),
+         f"📋 Công việc: ⏰ <b>{len(tg['late'])}</b> quá hạn · ⏳ {len(tg['doing'])} đang làm · ✅ {len(tg['done'])} xong",
+         f"📄 Báo cáo: <b>{n_rep}/{rep['staff_count']}</b> người đã nộp"]
+    if rep.get("ai") and rep["tom_tat"]:
+        L += ["", f"📝 {e(rep['tom_tat'])}"]
+
+    # ---- 1. Khách hàng ----
+    L += ["", SEP, f"1️⃣ <b>KHÁCH HÀNG</b>  ({len(threads)} khách · ⏳ {len(waiting)} chờ phản hồi)", ""]
     if not threads:
-        L.append("Không có tin nhắn khách hàng.")
-    for t in threads[:10]:
-        L.append(f"{'⏳' if t['cho_phan_hoi'] else '✅'} {t['ten']} – {t['so_tin']} tin, lần cuối {_hm(t['lan_cuoi'])}"
-                 + ("" if t["cho_phan_hoi"] else f" · {', '.join(t['nhan_vien'])} đã trả lời"))
-        L.append(f"   {t['tom_tat'][:230]}")
+        L.append("<i>Không có tin nhắn khách hàng.</i>")
+    for t in threads[:8]:
+        name, company = _split_title(t["ten"])
+        L.append(f"{'⏳' if t['cho_phan_hoi'] else '✅'} <b>{e(name)}</b>" + (f" · {e(company)}" if company else ""))
+        status = "<i>chưa ai trả lời</i>" if t["cho_phan_hoi"] and not t["nhan_vien"] else (
+            "<i>khách đang chờ trả lời</i>" if t["cho_phan_hoi"] else f"{e(', '.join(_first_name(x) for x in t['nhan_vien']))} đã trả lời")
+        L.append(f"     🕒 {_hm(t['lan_cuoi'])} · {t['so_tin']} tin · {status}")
+        if rep.get("ai") and t.get("tom_tat"):
+            L.append(f"     📝 {e(_cut(t['tom_tat'], 160))}")
+        else:
+            for q in t["noi_dung"][-2:]:
+                L.append(f"     💬 “{e(_cut(q, 110))}”")
+            if not t["cho_phan_hoi"] and t["tra_loi_cuoi"]:
+                L.append(f"     ↪️ <i>{e(_cut(t['tra_loi_cuoi'], 100))}</i>")
+        L.append("")
+    if len(threads) > 8:
+        L.append(f"<i>… và {len(threads) - 8} khách khác (xem file Excel)</i>")
 
-    # 2. Đồng nghiệp
-    L += ["", "━━━━━━━━━━━━━━", f"2️⃣ TIN NHẮN ĐỒNG NGHIỆP ({rep['col_count']} tin)"]
+    # ---- 2. Đồng nghiệp ----
+    L += [SEP, f"2️⃣ <b>ĐỒNG NGHIỆP</b>  ({rep['col_count']} tin nhắn)", ""]
     if not rep["col_count"]:
-        L.append("Chưa có tin nhắn trao đổi.")
-    for g in a["theo_nhom"][:5]:
-        items = g.get("noi_dung", [])
-        L.append(f"▸ {g['ten']} ({len(items)})")
-        L += [f"   • {x[:140]}" for x in items[:2]]
-    if a["van_de"]:
-        L += ["⚠️ Vấn đề cần xử lý:"] + [f"   • [{v.get('muc_do') or UNKNOWN}] {v.get('nguoi_lien_quan') or ''}: {v.get('van_de', '')[:140]}"
-                                     for v in sorted(a["van_de"], key=lambda v: v.get("muc_do") != "Cao")[:6]]
+        L.append("<i>Chưa có tin nhắn trao đổi.</i>")
+    if urgent:
+        L.append("🔴 <b>Cần xử lý gấp</b>")
+        L += [f"     • <b>{e(_first_name(v.get('nguoi_lien_quan')))}</b>: {e(_cut(v.get('van_de'), 110))}" for v in urgent[:4]]
+        L.append("")
+    if watch:
+        L.append("🟡 <b>Cần theo dõi</b>")
+        L += [f"     • <b>{e(_first_name(v.get('nguoi_lien_quan')))}</b>: {e(_cut(v.get('van_de'), 110))}" for v in watch[:4]]
+        L.append("")
+    if a["theo_nhom"]:
+        L.append("📂 <b>Nội dung trao đổi</b>")
+        for g in a["theo_nhom"][:5]:
+            items = g.get("noi_dung", [])
+            L.append(f"     ▸ <b>{e(g['ten'])}</b> ({len(items)})")
+            for x in items[:2]:
+                who, _, msg = x.partition(": ")
+                L.append(f"        – {e(_first_name(who))}: {e(_cut(msg or who, 95))}")
+        L.append("")
     if a["de_xuat"]:
-        L += ["💡 Đề xuất:"] + [f"   • {p.get('nguoi') or ''}: {p.get('noi_dung', '')[:140]}" for p in a["de_xuat"][:3]]
+        L.append("💡 <b>Đề xuất</b>")
+        L += [f"     • <b>{e(_first_name(p.get('nguoi')))}</b>: {e(_cut(p.get('noi_dung'), 110))}" for p in a["de_xuat"][:3]]
+        L.append("")
 
-    # 3. Tiến độ công việc
-    L += ["", "━━━━━━━━━━━━━━",
-          f"3️⃣ TIẾN ĐỘ CÔNG VIỆC (✅ {len(tg['done'])} xong · ⏳ {len(tg['doing'])} đang làm · 🔲 {len(tg['todo'])} chưa làm · ⏰ {len(tg['late'])} quá hạn)"]
-    fmt = lambda t, ic: f"{ic} {t['title']} — {t['assignee'] or UNKNOWN} · {t['progress']}% · hạn {summary._fmt_date(t['deadline'])}"
-    L += [fmt(t, "⏰") for t in tg["late"]] + [fmt(t, "⏳") for t in tg["doing"]] + [fmt(t, "🔲") for t in tg["todo"]] + [fmt(t, "✅") for t in tg["done"]]
-    if a["dau_viec"]:
-        icon = {"Hoàn thành": "✅", "Đang làm": "⏳"}
-        L += ["Cập nhật từ tin nhắn:"] + [
-            f"   {icon.get(t.get('trang_thai'), '🔲')} {t.get('cong_viec', '')[:130]} — {t.get('nguoi_phu_trach') or UNKNOWN}"
-            + (f" · {t['tien_do']}" if t.get("tien_do") else "") for t in a["dau_viec"][:6]]
+    # ---- 3. Tiến độ công việc ----
+    L += [SEP, "3️⃣ <b>TIẾN ĐỘ CÔNG VIỆC</b>", ""]
 
-    # 4. Nội dung các bài báo cáo
-    L += ["", "━━━━━━━━━━━━━━", f"4️⃣ NỘI DUNG BÁO CÁO ({len({r['nguoi'] for r in reps})}/{rep['staff_count']} người đã nộp)"]
+    def task_block(title, items, show_pct=True):
+        if not items:
+            return
+        L.append(title)
+        for t in items[:4]:
+            L.append(f"     • {e(t['title'])} — <b>{e(_first_name(t['assignee']))}</b>"
+                     + (f" · {t['progress']}%" if show_pct else "") + f" · hạn {summary._fmt_date(t['deadline'])[:5]}")
+        if len(items) > 4:
+            L.append(f"     <i>+ {len(items) - 4} việc khác</i>")
+        L.append("")
+    task_block(f"⏰ <b>Quá hạn ({len(tg['late'])})</b>", tg["late"])
+    task_block(f"⏳ <b>Đang làm ({len(tg['doing'])})</b>", tg["doing"])
+    task_block(f"🔲 <b>Chưa làm ({len(tg['todo'])})</b>", tg["todo"], False)
+    task_block(f"✅ <b>Đã xong ({len(tg['done'])})</b>", tg["done"], False)
+    if not any(tg.values()):
+        L += ["<i>Chưa có công việc được giao.</i>", ""]
+
+    # ---- 4. Báo cáo ----
+    L += [SEP, f"4️⃣ <b>BÁO CÁO ĐÃ NỘP</b>  ({n_rep}/{rep['staff_count']} người)", ""]
     if not reps:
-        L.append("Chưa có báo cáo nào trong kỳ.")
-    for r in reps[:15]:
-        day = f"[{r['ngay'][8:10]}/{r['ngay'][5:7]}] " if not rep["label"].startswith("hôm") else ""
-        L.append(f"📄 {day}{r['nguoi']} – {r['chu_de']}")
-        L.append(f"   {r['tom_tat'] if len(r['tom_tat']) <= 230 else r['tom_tat'][:230].rsplit(' ', 1)[0] + '…'}")
-    if len(reps) > 15:
-        L.append(f"… và {len(reps) - 15} báo cáo khác (xem file Excel)")
+        L.append("<i>Chưa có báo cáo nào trong kỳ.</i>")
+    for r in reps[:10]:
+        day = "" if rep["label"].startswith("hôm") else f" [{r['ngay'][8:10]}/{r['ngay'][5:7]}]"
+        L.append(f"📄 <b>{e(r['nguoi'])}</b>{day} – {e(r['chu_de'])}")
+        L.append(f"     {e(_cut(r['tom_tat'], 150))}")
+        L.append("")
+    if len(reps) > 10:
+        L.append(f"<i>… và {len(reps) - 10} báo cáo khác (xem file Excel)</i>")
     if rep["missing_staff"]:
-        L.append("❌ Chưa nộp: " + ", ".join(m["full_name"] for m in rep["missing_staff"]))
+        L.append("❌ <b>Chưa nộp:</b> " + e(", ".join(m["full_name"] for m in rep["missing_staff"])))
+    L += ["", "👇 Bấm nút bên dưới để tải file Excel / Word / PDF"]
     return "\n".join(L)
